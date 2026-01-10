@@ -1,6 +1,7 @@
 const express = require('express');
 const {
   getObVersions,
+  getMyObVersions,
   createObVersion,
   updateObVersion,
   deleteObVersion,
@@ -13,6 +14,7 @@ const router = express.Router();
 router.get('/', getObVersions);
 
 // Admin
+router.get('/mine', protect, getMyObVersions);
 router.post('/', protect, createObVersion);
 router.put('/:id', protect, updateObVersion);
 router.delete('/:id', protect, deleteObVersion);

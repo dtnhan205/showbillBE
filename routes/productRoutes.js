@@ -4,6 +4,7 @@ const express = require('express');
 const {
   getProducts,
   getMyProducts,
+  getAllProducts,
   createProduct,
   updateProduct,
   deleteProduct,
@@ -23,6 +24,7 @@ router.get('/', getProducts);
  * PROTECTED (Admin)
  */
 router.get('/mine', protect, getMyProducts);
+router.get('/all', protect, getAllProducts);
 router.post('/', protect, upload, createProduct);
 router.put('/:id', protect, upload, updateProduct);
 router.delete('/:id', protect, deleteProduct);

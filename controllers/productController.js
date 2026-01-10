@@ -57,6 +57,24 @@ exports.getMyProducts = async (req, res) => {
   }
 };
 
+/**
+ * SUPER ADMIN: GET /api/products/all
+ * All bills from all admins (only for super admin)
+ */
+exports.getAllProducts = async (req, res) => {
+  try {
+    // Chỉ super admin mới được truy cập
+    if (req.admin?.role !== 'super') {
+      return res.status(403).json({ message: 'Chỉ super admin mới có quyền truy cập' });
+    }
+    
+    const products = await Product.find({}).sort({ createdAt: -1 });
+    res.json(products);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
 // ADMIN: create product (bill) - only name + image + obVersion + category
 exports.createProduct = async (req, res) => {
   try {
