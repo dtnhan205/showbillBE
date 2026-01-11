@@ -1,5 +1,17 @@
 const Admin = require('../models/Admin');
 const Product = require('../models/Product');
+const ViewStat = require('../models/ViewStat');
+
+// Helper function: Lấy ngày theo timezone Việt Nam (UTC+7)
+function getVietnamDate(date = new Date()) {
+  // Convert sang timezone Việt Nam (UTC+7)
+  const vietnamTime = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }));
+  // Format: YYYY-MM-DD
+  const year = vietnamTime.getFullYear();
+  const month = String(vietnamTime.getMonth() + 1).padStart(2, '0');
+  const day = String(vietnamTime.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 // GET /api/public/admins
 exports.getPublicAdmins = async (req, res) => {
@@ -9,13 +21,14 @@ exports.getPublicAdmins = async (req, res) => {
       .select('displayName bio avatarBase64 role createdAt profileViews')
       .sort({ createdAt: -1 });
 
-    // Aggregate total bills per admin
+    // Aggregate total bills và views per admin
     const stats = await Product.aggregate([
       { $match: { isHidden: false } },
       {
         $group: {
           _id: '$adminId',
           totalBills: { $sum: 1 },
+          totalViews: { $sum: '$views' }, // Tổng views của tất cả products
         },
       },
     ]);
@@ -32,8 +45,8 @@ exports.getPublicAdmins = async (req, res) => {
         role: a.role,
         stats: {
           totalBills: s?.totalBills ?? 0,
-          // Lượt xem hiển thị ngoài client = số lần vào trang profile admin (profileViews)
-          totalViews: a.profileViews ?? 0,
+          // Lượt xem hiển thị ngoài client = tổng views của tất cả products (giống admin dashboard)
+          totalViews: s?.totalViews ?? 0,
         },
       };
     });
@@ -102,13 +115,34 @@ exports.incrementAdminViews = async (req, res) => {
 exports.incrementProductView = async (req, res) => {
   try {
     const { id } = req.params;
+    const product = await Product.findById(id);
+    
+    if (!product) return res.status(404).json({ message: 'Không tìm thấy bill' });
+
+    // Tăng views của product
     const updated = await Product.findByIdAndUpdate(
       id,
       { $inc: { views: 1 } },
-      { new: true, select: 'views' },
+      { new: true, select: 'views adminId' },
     );
 
-    if (!updated) return res.status(404).json({ message: 'Không tìm thấy bill' });
+    // Track views theo ngày (theo timezone Việt Nam)
+    const dateStr = getVietnamDate();
+
+    // Tăng views cho admin của product
+    await ViewStat.findOneAndUpdate(
+      { date: dateStr, adminId: product.adminId },
+      { $inc: { views: 1 } },
+      { upsert: true, new: true },
+    );
+
+    // Tăng views cho system-wide (adminId = null)
+    await ViewStat.findOneAndUpdate(
+      { date: dateStr, adminId: null },
+      { $inc: { views: 1 } },
+      { upsert: true, new: true },
+    );
+
     res.json({ views: updated.views });
   } catch (err) {
     res.status(500).json({ message: err.message });

@@ -7,6 +7,8 @@ const {
   updateMyProfile,
   getMyStats,
   getSystemStats,
+  getMyChartData,
+  getSystemChartData,
 } = require('../controllers/adminController');
 
 const router = express.Router();
@@ -22,5 +24,9 @@ router.put('/profile', protect, updateMyProfile);
 // Stats
 router.get('/stats', protect, getMyStats);
 router.get('/system-stats', protect, requireSuperAdmin, getSystemStats);
+
+// Chart data
+router.get('/chart-data', protect, getMyChartData);
+router.get('/system-chart-data', protect, requireSuperAdmin, getSystemChartData);
 
 module.exports = router;
