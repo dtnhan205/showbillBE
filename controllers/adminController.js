@@ -34,7 +34,7 @@ function getVietnamTodayStart() {
 exports.getAllAdmins = async (req, res) => {
   try {
     const admins = await Admin.find({})
-      .select('username email role displayName bio avatarBase64 isActive createdAt updatedAt')
+      .select('username email role displayName bio avatarBase64 bannerBase64 isActive createdAt updatedAt')
       .sort({ createdAt: -1 });
 
     res.json(admins);
@@ -89,12 +89,13 @@ exports.getMyProfile = async (req, res) => {
 exports.updateMyProfile = async (req, res) => {
   try {
     const adminId = req.admin._id;
-    const { displayName, bio, avatarBase64 } = req.body;
+    const { displayName, bio, avatarBase64, bannerBase64 } = req.body;
 
     const update = {};
     if (typeof displayName !== 'undefined') update.displayName = String(displayName).trim();
     if (typeof bio !== 'undefined') update.bio = String(bio);
     if (typeof avatarBase64 !== 'undefined') update.avatarBase64 = String(avatarBase64);
+    if (typeof bannerBase64 !== 'undefined') update.bannerBase64 = String(bannerBase64);
 
     const admin = await Admin.findByIdAndUpdate(adminId, update, { new: true }).select('-password');
     res.json(admin);

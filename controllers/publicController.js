@@ -18,7 +18,7 @@ exports.getPublicAdmins = async (req, res) => {
   try {
     // Chỉ hiển thị admin thường, không hiển thị super admin (không check isActive ở public route)
     const admins = await Admin.find({ role: 'admin' })
-      .select('displayName bio avatarBase64 role createdAt profileViews')
+      .select('displayName bio avatarBase64 bannerBase64 role createdAt profileViews')
       .sort({ createdAt: -1 });
 
     // Aggregate total bills và views per admin
@@ -42,6 +42,7 @@ exports.getPublicAdmins = async (req, res) => {
         displayName: a.displayName || a.username,
         bio: a.bio || '',
         avatarBase64: a.avatarBase64 || '',
+        bannerBase64: a.bannerBase64 || '',
         role: a.role,
         stats: {
           totalBills: s?.totalBills ?? 0,
@@ -62,7 +63,7 @@ exports.getPublicAdminDetail = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const admin = await Admin.findById(id).select('displayName bio avatarBase64 role createdAt');
+    const admin = await Admin.findById(id).select('displayName bio avatarBase64 bannerBase64 role createdAt');
     if (!admin) return res.status(404).json({ message: 'Không tìm thấy admin' });
 
     // Only visible bills
@@ -78,6 +79,7 @@ exports.getPublicAdminDetail = async (req, res) => {
         displayName: admin.displayName,
         bio: admin.bio,
         avatarBase64: admin.avatarBase64,
+        bannerBase64: admin.bannerBase64,
         role: admin.role,
       },
       obs,

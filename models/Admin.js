@@ -17,6 +17,7 @@ const adminSchema = new mongoose.Schema(
     displayName: { type: String, trim: true },
     bio: { type: String, default: '', trim: true },
     avatarBase64: { type: String, default: '' },
+    bannerBase64: { type: String, default: '' },
 
     // Tổng lượt xem profile (client vào trang admin 1 lần = +1, không phụ thuộc số bill)
     profileViews: { type: Number, default: 0 },
