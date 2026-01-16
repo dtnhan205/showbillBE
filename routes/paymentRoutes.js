@@ -7,10 +7,13 @@ const {
   getPaymentDetail,
   deletePayment,
   verifyPayment,
+  switchPackage,
 } = require('../controllers/paymentController');
 const {
   getPackageConfigs,
   updatePackageConfig,
+  createPackageConfig,
+  deletePackageConfig,
   getBankAccounts,
   createBankAccount,
   updateBankAccount,
@@ -26,6 +29,7 @@ const router = express.Router();
 router.get('/my-package', protect, getMyPackage);
 router.get('/packages', protect, getPackages);
 router.post('/create', protect, createPayment);
+router.post('/switch-package', protect, switchPackage);
 router.get('/history', protect, getPaymentHistory);
 router.delete('/:id', protect, deletePayment);
 router.get('/:id', protect, getPaymentDetail);
@@ -34,7 +38,9 @@ router.get('/:id', protect, getPaymentDetail);
  * Super admin routes
  */
 router.get('/admin/packages/config', protect, requireSuperAdmin, getPackageConfigs);
+router.post('/admin/packages/config', protect, requireSuperAdmin, createPackageConfig);
 router.put('/admin/packages/config/:type', protect, requireSuperAdmin, updatePackageConfig);
+router.delete('/admin/packages/config/:type', protect, requireSuperAdmin, deletePackageConfig);
 router.get('/admin/bank-accounts', protect, requireSuperAdmin, getBankAccounts);
 router.post('/admin/bank-accounts', protect, requireSuperAdmin, createBankAccount);
 router.put('/admin/bank-accounts/:id', protect, requireSuperAdmin, updateBankAccount);

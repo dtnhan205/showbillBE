@@ -43,23 +43,43 @@ async function getBillsUploadedThisMonth(adminId) {
 // GET /api/admin/payment/my-package - Admin: Xem gói hiện tại và số bill đã upload
 exports.getMyPackage = async (req, res) => {
   try {
-    const admin = await Admin.findById(req.admin._id).select('package packageExpiry');
+    const admin = await Admin.findById(req.admin._id).select('package packageExpiry activePackage ownedPackages');
     if (!admin) {
       return res.status(404).json({ message: 'Không tìm thấy admin.' });
     }
 
-    // Kiểm tra hết hạn gói
-    let currentPackage = admin.package;
-    let packageExpiry = admin.packageExpiry;
+    // Lọc các gói đã hết hạn
+    const now = new Date();
+    const validPackages = (admin.ownedPackages || []).filter((pkg) => new Date(pkg.expiryDate) > now);
+    
+    // Cập nhật ownedPackages nếu có gói hết hạn
+    if (admin.ownedPackages.length !== validPackages.length) {
+      admin.ownedPackages = validPackages;
+    }
 
-    if (packageExpiry && new Date() > packageExpiry) {
-      // Gói đã hết hạn, về basic
-      currentPackage = 'basic';
-      packageExpiry = null;
-      await Admin.findByIdAndUpdate(req.admin._id, {
-        package: 'basic',
-        packageExpiry: null,
-      });
+    // Kiểm tra activePackage có còn hợp lệ không
+    let currentPackage = admin.activePackage || admin.package || 'basic';
+    let packageExpiry = null;
+
+    // Nếu activePackage không phải basic, kiểm tra xem còn hợp lệ không
+    if (currentPackage !== 'basic') {
+      const activePkg = validPackages.find((pkg) => pkg.packageType === currentPackage);
+      if (!activePkg) {
+        // Gói đang active đã hết hạn, chuyển về basic hoặc gói còn hạn đầu tiên
+        if (validPackages.length > 0) {
+          currentPackage = validPackages[0].packageType;
+          packageExpiry = validPackages[0].expiryDate;
+        } else {
+          currentPackage = 'basic';
+          packageExpiry = null;
+        }
+        admin.activePackage = currentPackage;
+        admin.package = currentPackage;
+        admin.packageExpiry = packageExpiry;
+        await admin.save();
+      } else {
+        packageExpiry = activePkg.expiryDate;
+      }
     }
 
     // Lấy số bill đã upload trong tháng
@@ -69,12 +89,22 @@ exports.getMyPackage = async (req, res) => {
     const packageConfig = await PackageConfig.findOne({ packageType: currentPackage });
     const billLimit = packageConfig ? packageConfig.billLimit : 20;
 
+    // Format ownedPackages để trả về
+    const ownedPackagesFormatted = validPackages.map((pkg) => ({
+      packageType: pkg.packageType,
+      expiryDate: pkg.expiryDate,
+      purchasedAt: pkg.purchasedAt,
+      isActive: pkg.packageType === currentPackage,
+    }));
+
     res.json({
       package: currentPackage,
+      activePackage: currentPackage,
       packageExpiry,
       billsUploaded,
       billLimit: billLimit === -1 ? null : billLimit, // null = unlimited
       canUpload: billLimit === -1 || billsUploaded < billLimit,
+      ownedPackages: ownedPackagesFormatted,
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -96,8 +126,15 @@ exports.createPayment = async (req, res) => {
   try {
     const { packageType, amount } = req.body;
 
-    if (!['pro', 'premium'].includes(packageType)) {
+    // Không cho phép mua gói basic
+    if (!packageType || packageType === 'basic') {
       return res.status(400).json({ message: 'Loại gói không hợp lệ.' });
+    }
+
+    // Kiểm tra gói có tồn tại trong PackageConfig không
+    const packageConfig = await PackageConfig.findOne({ packageType });
+    if (!packageConfig) {
+      return res.status(400).json({ message: 'Gói không tồn tại trong hệ thống.' });
     }
 
     // Kiểm tra số lượng đơn chưa thanh toán (pending)
@@ -138,12 +175,6 @@ exports.createPayment = async (req, res) => {
           timeRemaining: timeRemainingMinutes,
         });
       }
-    }
-
-    // Lấy giá gói từ config
-    const packageConfig = await PackageConfig.findOne({ packageType });
-    if (!packageConfig) {
-      return res.status(404).json({ message: 'Không tìm thấy cấu hình gói.' });
     }
 
     if (amount !== packageConfig.price) {
@@ -257,14 +288,36 @@ exports.verifyPayment = async (req, res) => {
       return res.status(400).json({ message: 'Hóa đơn đã được thanh toán.' });
     }
 
-    // Cập nhật gói cho admin
+    // Thêm gói vào ownedPackages của admin
     const expiryDate = new Date();
     expiryDate.setMonth(expiryDate.getMonth() + 1); // Thêm 1 tháng
 
-    await Admin.findByIdAndUpdate(payment.adminId, {
-      package: payment.packageType,
-      packageExpiry: expiryDate,
-    });
+    const admin = await Admin.findById(payment.adminId);
+    if (admin) {
+      // Thêm gói vào ownedPackages nếu chưa có
+      const existingPackage = admin.ownedPackages.find(
+        (pkg) => pkg.packageType === payment.packageType && pkg.expiryDate.getTime() === expiryDate.getTime()
+      );
+
+      if (!existingPackage) {
+        admin.ownedPackages.push({
+          packageType: payment.packageType,
+          expiryDate: expiryDate,
+          purchasedAt: new Date(),
+        });
+      }
+
+      // Nếu chưa có activePackage hoặc activePackage là basic, tự động set gói mới làm active
+      if (!admin.activePackage || admin.activePackage === 'basic') {
+        admin.activePackage = payment.packageType;
+      }
+
+      // Giữ package và packageExpiry để backward compatibility
+      admin.package = payment.packageType;
+      admin.packageExpiry = expiryDate;
+
+      await admin.save();
+    }
 
     // Cập nhật trạng thái payment
     payment.status = 'completed';
@@ -272,6 +325,62 @@ exports.verifyPayment = async (req, res) => {
     await payment.save();
 
     res.json({ message: 'Đã xác minh thanh toán thành công.', payment });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// POST /api/admin/payment/switch-package - Admin: Chuyển đổi gói đang sử dụng
+exports.switchPackage = async (req, res) => {
+  try {
+    const { packageType } = req.body;
+
+    if (!packageType) {
+      return res.status(400).json({ message: 'Vui lòng chọn gói.' });
+    }
+
+    const admin = await Admin.findById(req.admin._id);
+    if (!admin) {
+      return res.status(404).json({ message: 'Không tìm thấy admin.' });
+    }
+
+    // Nếu chọn basic, luôn cho phép
+    if (packageType === 'basic') {
+      admin.activePackage = 'basic';
+      admin.package = 'basic';
+      admin.packageExpiry = null;
+      await admin.save();
+      return res.json({ message: 'Đã chuyển sang gói Basic.', activePackage: 'basic' });
+    }
+
+    // Kiểm tra xem gói có tồn tại trong PackageConfig không (cho gói tùy chỉnh)
+    const packageConfig = await PackageConfig.findOne({ packageType });
+    if (!packageConfig) {
+      return res.status(400).json({ message: 'Loại gói không hợp lệ.' });
+    }
+
+    // Kiểm tra xem admin có gói này trong ownedPackages không
+    const now = new Date();
+    const validPackages = (admin.ownedPackages || []).filter((pkg) => new Date(pkg.expiryDate) > now);
+    const targetPackage = validPackages.find((pkg) => pkg.packageType === packageType);
+
+    if (!targetPackage) {
+      return res.status(400).json({
+        message: `Bạn chưa mua gói ${packageType} hoặc gói đã hết hạn. Vui lòng mua gói trước khi chuyển đổi.`,
+      });
+    }
+
+    // Chuyển đổi gói
+    admin.activePackage = packageType;
+    admin.package = packageType;
+    admin.packageExpiry = targetPackage.expiryDate;
+    await admin.save();
+
+    res.json({
+      message: `Đã chuyển sang gói ${packageType}.`,
+      activePackage: packageType,
+      packageExpiry: targetPackage.expiryDate,
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

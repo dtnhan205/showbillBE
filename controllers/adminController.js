@@ -78,26 +78,97 @@ exports.toggleAdminActive = async (req, res) => {
 // GET /api/admin/profile
 exports.getMyProfile = async (req, res) => {
   try {
-    const admin = await Admin.findById(req.admin._id).select('-password');
+    const admin = await Admin.findById(req.admin._id)
+      .select('-password')
+      .lean(); // Dùng lean() để trả về plain object
     res.json(admin);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
 
+// Helper: Validate frame theo gói
+function validateFrameForPackage(framePath, activePackage) {
+  if (!framePath) return true; // Cho phép xóa frame (empty string)
+  
+  // Extract package từ frame path (e.g., 'basic/basic1.gif' -> 'basic')
+  const framePackage = framePath.split('/')[0].toLowerCase();
+  const userPackage = (activePackage || 'basic').toLowerCase();
+  
+  // Logic theo yêu cầu:
+  // - Basic: chỉ mở basic, đóng tất cả trả phí
+  // - Pro: mở basic + pro, đóng premium + vip
+  // - Premium: mở tất cả (basic + pro + premium + vip)
+  // - VIP: mở basic + vip, đóng pro + premium
+  
+  if (userPackage === 'basic') {
+    // Basic: chỉ mở basic
+    return framePackage === 'basic';
+  } else if (userPackage === 'pro') {
+    // Pro: mở basic + pro, đóng premium + vip
+    return framePackage === 'basic' || framePackage === 'pro';
+  } else if (userPackage === 'premium') {
+    // Premium: mở tất cả
+    return true;
+  } else if (userPackage === 'vip') {
+    // VIP: mở basic + vip, đóng pro + premium
+    return framePackage === 'basic' || framePackage === 'vip';
+  } else {
+    // Gói tùy chỉnh: chỉ mở frames của chính gói đó
+    return framePackage === userPackage;
+  }
+}
+
 // PUT /api/admin/profile (admin update profile)
 exports.updateMyProfile = async (req, res) => {
   try {
     const adminId = req.admin._id;
-    const { displayName, bio, avatarBase64, bannerBase64 } = req.body;
+    const { displayName, bio, avatarBase64, bannerBase64, avatarFrame } = req.body;
+
+    // Lấy admin hiện tại để kiểm tra activePackage
+    const currentAdmin = await Admin.findById(adminId);
+    if (!currentAdmin) {
+      return res.status(404).json({ message: 'Không tìm thấy admin.' });
+    }
 
     const update = {};
     if (typeof displayName !== 'undefined') update.displayName = String(displayName).trim();
     if (typeof bio !== 'undefined') update.bio = String(bio);
     if (typeof avatarBase64 !== 'undefined') update.avatarBase64 = String(avatarBase64);
     if (typeof bannerBase64 !== 'undefined') update.bannerBase64 = String(bannerBase64);
+    
+    // Xử lý avatarFrame
+    if (typeof avatarFrame !== 'undefined') {
+      const trimmedFrame = String(avatarFrame).trim();
+      
+      // Nếu có giá trị (không phải empty string), validate theo gói
+      if (trimmedFrame) {
+        const activePackage = currentAdmin.activePackage || 'basic';
+        if (!validateFrameForPackage(trimmedFrame, activePackage)) {
+          return res.status(400).json({ 
+            message: 'Vui lòng nâng cấp gói để sử dụng khung này.' 
+          });
+        }
+        
+        // Validate format: phải có dạng 'package/filename.gif'
+        if (!trimmedFrame.includes('/') || !trimmedFrame.endsWith('.gif')) {
+          return res.status(400).json({ 
+            message: 'Đường dẫn khung không hợp lệ. Định dạng: package/filename.gif' 
+          });
+        }
+      }
+      
+      // Lưu avatarFrame (có thể là empty string để xóa frame)
+      update.avatarFrame = trimmedFrame;
+    }
 
-    const admin = await Admin.findByIdAndUpdate(adminId, update, { new: true }).select('-password');
+    const admin = await Admin.findByIdAndUpdate(adminId, update, { new: true })
+      .select('-password')
+      .lean(); // Dùng lean() để trả về plain object
+    
+    // Log để debug
+    console.log('[updateMyProfile] Updated avatarFrame:', admin?.avatarFrame);
+    
     res.json(admin);
   } catch (err) {
     res.status(500).json({ message: err.message });

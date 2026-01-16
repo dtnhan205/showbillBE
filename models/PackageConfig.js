@@ -4,9 +4,10 @@ const packageConfigSchema = new mongoose.Schema(
   {
     packageType: {
       type: String,
-      enum: ['basic', 'pro', 'premium'],
       required: true,
       unique: true,
+      trim: true,
+      lowercase: true,
     },
     price: {
       type: Number,
@@ -17,6 +18,11 @@ const packageConfigSchema = new mongoose.Schema(
       type: Number,
       required: true,
       // basic: 20, pro: 100, premium: -1 (unlimited)
+    },
+    color: {
+      type: String,
+      default: '#3b82f6', // Màu mặc định (xanh dương)
+      trim: true,
     },
   },
   { timestamps: true },

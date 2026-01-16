@@ -8,7 +8,7 @@ const storage = multer.memoryStorage();
 
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // Giới hạn 5MB
+  limits: { fileSize: 50 * 1024 * 1024 }, // Giới hạn 50MB mỗi file
   fileFilter: (req, file, cb) => {
     const filetypes = /jpeg|jpg|png|gif|webp/;
     const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
@@ -22,5 +22,12 @@ const upload = multer({
   },
 });
 
-// Chỉ upload 1 file với field name là "image"
-module.exports = upload.single('image');
+// Upload 1 file với field name là "image" (cho update)
+const uploadSingle = upload.single('image');
+
+// Upload nhiều file với field name là "images" (cho bulk upload)
+const uploadMultiple = upload.array('images', 20); // Tối đa 20 file
+
+module.exports = uploadSingle;
+module.exports.uploadSingle = uploadSingle;
+module.exports.uploadMultiple = uploadMultiple;

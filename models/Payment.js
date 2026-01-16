@@ -9,8 +9,9 @@ const paymentSchema = new mongoose.Schema(
     },
     packageType: {
       type: String,
-      enum: ['pro', 'premium'],
       required: true,
+      lowercase: true,
+      trim: true,
     },
     amount: {
       type: Number,

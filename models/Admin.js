@@ -18,6 +18,7 @@ const adminSchema = new mongoose.Schema(
     bio: { type: String, default: '', trim: true },
     avatarBase64: { type: String, default: '' },
     bannerBase64: { type: String, default: '' },
+    avatarFrame: { type: String, default: '', trim: true }, // Path to frame image (e.g., 'basic/basic1.gif')
 
     // Tổng lượt xem profile (client vào trang admin 1 lần = +1, không phụ thuộc số bill)
     profileViews: { type: Number, default: 0 },
@@ -25,13 +26,40 @@ const adminSchema = new mongoose.Schema(
     // Package subscription
     package: {
       type: String,
-      enum: ['basic', 'pro', 'premium'],
       default: 'basic',
+      lowercase: true,
+      trim: true,
     },
     packageExpiry: {
       type: Date,
       // null = basic (vĩnh viễn), có date = pro/premium (hết hạn về basic)
     },
+    // Gói đang được sử dụng (có thể chọn từ ownedPackages)
+    activePackage: {
+      type: String,
+      default: 'basic',
+      lowercase: true,
+      trim: true,
+    },
+    // Danh sách các gói đã mua (với expiry date)
+    ownedPackages: [
+      {
+        packageType: {
+          type: String,
+          required: true,
+          lowercase: true,
+          trim: true,
+        },
+        expiryDate: {
+          type: Date,
+          required: true,
+        },
+        purchasedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
   },
   { timestamps: true },
 );

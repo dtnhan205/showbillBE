@@ -104,6 +104,95 @@ exports.createProduct = async (req, res) => {
   }
 };
 
+// ADMIN: create multiple products (bulk upload) - upload nhiều bill cùng lúc
+// Note: checkUploadLimit middleware sẽ được áp dụng ở route level
+exports.createMultipleProducts = async (req, res) => {
+  try {
+    const { names, obVersions, categories, obVersion, category } = req.body;
+    const files = req.files || [];
+
+    if (!files || files.length === 0) {
+      return res.status(400).json({ message: 'Vui lòng upload ít nhất một ảnh bill' });
+    }
+
+    // Parse names nếu là string (JSON)
+    let nameArray = [];
+    if (typeof names === 'string') {
+      try {
+        nameArray = JSON.parse(names);
+      } catch {
+        nameArray = names.split(',').map((n) => n.trim());
+      }
+    } else if (Array.isArray(names)) {
+      nameArray = names;
+    } else {
+      nameArray = [names || ''];
+    }
+
+    // Parse obVersions và categories nếu là string (JSON)
+    let obVersionsArray = [];
+    if (obVersions) {
+      if (typeof obVersions === 'string') {
+        try {
+          obVersionsArray = JSON.parse(obVersions);
+        } catch {
+          obVersionsArray = obVersions.split(',').map((ob) => ob.trim());
+        }
+      } else if (Array.isArray(obVersions)) {
+        obVersionsArray = obVersions;
+      }
+    }
+
+    let categoriesArray = [];
+    if (categories) {
+      if (typeof categories === 'string') {
+        try {
+          categoriesArray = JSON.parse(categories);
+        } catch {
+          categoriesArray = categories.split(',').map((cat) => cat.trim());
+        }
+      } else if (Array.isArray(categories)) {
+        categoriesArray = categories;
+      }
+    }
+
+    // Fallback: nếu không có arrays, dùng single values (backward compatibility)
+    const defaultOb = (obVersion ? String(obVersion) : 'ob51').trim().toLowerCase();
+    const defaultCat = (category ? String(category) : 'other').trim().toLowerCase();
+
+    // Tạo products cho mỗi file
+    const products = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const name = nameArray[i] || `Bill ${i + 1}`;
+      const base64Image = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+
+      // Sử dụng OB và Category riêng cho từng bill, fallback về default nếu không có
+      const obSlug = (obVersionsArray[i] ? String(obVersionsArray[i]) : defaultOb).trim().toLowerCase();
+      const catSlug = (categoriesArray[i] ? String(categoriesArray[i]) : defaultCat).trim().toLowerCase();
+
+      const product = await Product.create({
+        name: name.trim(),
+        imageBase64: base64Image,
+        obVersion: obSlug,
+        category: catSlug,
+        adminId: req.admin._id,
+        views: 0,
+      });
+
+      products.push(product);
+    }
+
+    res.status(201).json({
+      message: `Đã upload thành công ${products.length} bill`,
+      products,
+      count: products.length,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
 // ADMIN: update product - only owner (or super)
 exports.updateProduct = async (req, res) => {
   const { id } = req.params;

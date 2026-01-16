@@ -1,6 +1,7 @@
 const Admin = require('../models/Admin');
 const Product = require('../models/Product');
 const ViewStat = require('../models/ViewStat');
+const PackageConfig = require('../models/PackageConfig');
 
 // Helper function: Lấy ngày theo timezone Việt Nam (UTC+7)
 function getVietnamDate(date = new Date()) {
@@ -63,15 +64,46 @@ exports.getPublicAdminDetail = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const admin = await Admin.findById(id).select('displayName bio avatarBase64 bannerBase64 role createdAt');
+    let admin;
+    
+    // If id is full length (24 chars), try findById first
+    if (id.length === 24) {
+      admin = await Admin.findById(id).select('displayName bio avatarBase64 bannerBase64 role createdAt activePackage avatarFrame');
+    }
+    
+    // If not found or id is shorter than 24 chars, try to find by prefix
+    if (!admin && id.length < 24) {
+      // Use $expr to convert ObjectId to string and match prefix
+      const matchingAdmins = await Admin.find({
+        $expr: {
+          $eq: [
+            { $substr: [{ $toString: '$_id' }, 0, id.length] },
+            id
+          ]
+        }
+      }).select('displayName bio avatarBase64 bannerBase64 role createdAt activePackage avatarFrame');
+      
+      if (matchingAdmins.length === 1) {
+        admin = matchingAdmins[0];
+      } else if (matchingAdmins.length > 1) {
+        return res.status(400).json({ message: 'Có nhiều admin khớp với ID này. Vui lòng sử dụng ID đầy đủ.' });
+      }
+    }
+    
     if (!admin) return res.status(404).json({ message: 'Không tìm thấy admin' });
 
+    const adminId = admin._id.toString();
     // Only visible bills
-    const products = await Product.find({ adminId: id, isHidden: false }).sort({ createdAt: -1 });
+    const products = await Product.find({ adminId: adminId, isHidden: false }).sort({ createdAt: -1 });
 
     // Unique obs + categories from their products
     const obs = Array.from(new Set(products.map((p) => p.obVersion).filter(Boolean))).sort();
     const categories = Array.from(new Set(products.map((p) => p.category).filter(Boolean))).sort();
+
+    // Lấy màu của gói từ PackageConfig
+    const packageType = admin.activePackage || 'basic';
+    const packageConfig = await PackageConfig.findOne({ packageType });
+    const packageColor = packageConfig?.color || (packageType === 'pro' ? '#3b82f6' : packageType === 'premium' ? '#f59e0b' : '#94a3b8');
 
     res.json({
       admin: {
@@ -81,6 +113,9 @@ exports.getPublicAdminDetail = async (req, res) => {
         avatarBase64: admin.avatarBase64,
         bannerBase64: admin.bannerBase64,
         role: admin.role,
+        activePackage: packageType,
+        packageColor: packageColor,
+        avatarFrame: admin.avatarFrame || '',
       },
       obs,
       categories,
@@ -96,12 +131,40 @@ exports.incrementAdminViews = async (req, res) => {
   try {
     const { id } = req.params;
     
-    // Check if admin exists
-    const admin = await Admin.findByIdAndUpdate(
-      id,
-      { $inc: { profileViews: 1 } },
-      { new: true, select: 'profileViews' },
-    );
+    let admin;
+    
+    // If id is full length (24 chars), try findByIdAndUpdate first
+    if (id.length === 24) {
+      admin = await Admin.findByIdAndUpdate(
+        id,
+        { $inc: { profileViews: 1 } },
+        { new: true, select: 'profileViews' },
+      );
+    }
+    
+    // If not found or id is shorter than 24 chars, try to find by prefix
+    if (!admin && id.length < 24) {
+      // Use $expr to convert ObjectId to string and match prefix
+      const matchingAdmins = await Admin.find({
+        $expr: {
+          $eq: [
+            { $substr: [{ $toString: '$_id' }, 0, id.length] },
+            id
+          ]
+        }
+      });
+      
+      if (matchingAdmins.length === 1) {
+        admin = await Admin.findByIdAndUpdate(
+          matchingAdmins[0]._id,
+          { $inc: { profileViews: 1 } },
+          { new: true, select: 'profileViews' },
+        );
+      } else if (matchingAdmins.length > 1) {
+        return res.status(400).json({ message: 'Có nhiều admin khớp với ID này. Vui lòng sử dụng ID đầy đủ.' });
+      }
+    }
+    
     if (!admin) return res.status(404).json({ message: 'Không tìm thấy admin' });
 
     res.json({

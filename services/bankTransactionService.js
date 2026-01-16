@@ -163,14 +163,36 @@ async function checkAndUpdatePayments() {
         });
 
         if (matchingTransaction) {
-          // Tìm thấy giao dịch khớp, cập nhật gói cho admin
+          // Tìm thấy giao dịch khớp, thêm gói vào ownedPackages
           const expiryDate = new Date();
           expiryDate.setMonth(expiryDate.getMonth() + 1); // Thêm 1 tháng
 
-          await Admin.findByIdAndUpdate(payment.adminId, {
-            package: payment.packageType,
-            packageExpiry: expiryDate,
-          });
+          const admin = await Admin.findById(payment.adminId);
+          if (admin) {
+            // Thêm gói vào ownedPackages nếu chưa có
+            const existingPackage = admin.ownedPackages.find(
+              (pkg) => pkg.packageType === payment.packageType && pkg.expiryDate.getTime() === expiryDate.getTime()
+            );
+
+            if (!existingPackage) {
+              admin.ownedPackages.push({
+                packageType: payment.packageType,
+                expiryDate: expiryDate,
+                purchasedAt: new Date(),
+              });
+            }
+
+            // Nếu chưa có activePackage hoặc activePackage là basic, tự động set gói mới làm active
+            if (!admin.activePackage || admin.activePackage === 'basic') {
+              admin.activePackage = payment.packageType;
+            }
+
+            // Giữ package và packageExpiry để backward compatibility
+            admin.package = payment.packageType;
+            admin.packageExpiry = expiryDate;
+
+            await admin.save();
+          }
 
           // Cập nhật trạng thái payment
           payment.status = 'completed';
@@ -178,7 +200,7 @@ async function checkAndUpdatePayments() {
           await payment.save();
 
           updated++;
-          console.log(`[BankTransactionService] ✓ Payment ${payment._id} (${payment.transferContent}, ${payment.amount} VNĐ) đã được xác minh và cập nhật gói ${payment.packageType} cho admin ${payment.adminId}`);
+          console.log(`[BankTransactionService] ✓ Payment ${payment._id} (${payment.transferContent}, ${payment.amount} VNĐ) đã được xác minh và thêm gói ${payment.packageType} cho admin ${payment.adminId}`);
         } else {
           console.log(`[BankTransactionService] - Payment ${payment._id} (${payment.transferContent}, ${payment.amount} VNĐ) chưa tìm thấy giao dịch khớp`);
         }

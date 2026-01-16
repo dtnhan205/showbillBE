@@ -6,6 +6,7 @@ const {
   getMyProducts,
   getAllProducts,
   createProduct,
+  createMultipleProducts,
   updateProduct,
   deleteProduct,
   toggleHidden,
@@ -27,6 +28,7 @@ router.get('/', getProducts);
 router.get('/mine', protect, getMyProducts);
 router.get('/all', protect, getAllProducts);
 router.post('/', protect, checkUploadLimit, upload, createProduct);
+router.post('/bulk', protect, checkUploadLimit, upload.uploadMultiple, createMultipleProducts);
 router.put('/:id', protect, upload, updateProduct);
 router.delete('/:id', protect, deleteProduct);
 router.patch('/:id/toggle-hidden', protect, toggleHidden);
