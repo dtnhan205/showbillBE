@@ -21,6 +21,17 @@ const adminSchema = new mongoose.Schema(
 
     // Tổng lượt xem profile (client vào trang admin 1 lần = +1, không phụ thuộc số bill)
     profileViews: { type: Number, default: 0 },
+
+    // Package subscription
+    package: {
+      type: String,
+      enum: ['basic', 'pro', 'premium'],
+      default: 'basic',
+    },
+    packageExpiry: {
+      type: Date,
+      // null = basic (vĩnh viễn), có date = pro/premium (hết hạn về basic)
+    },
   },
   { timestamps: true },
 );

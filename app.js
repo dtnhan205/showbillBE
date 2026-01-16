@@ -17,6 +17,7 @@ app.use('/api/obs', require('./routes/obRoutes'));
 app.use('/api/categories', require('./routes/categoryRoutes'));
 app.use('/api/public', require('./routes/publicRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
+app.use('/api/payment', require('./routes/paymentRoutes'));
 
 app.get('/', (req, res) => {
   res.send('Backend Admin + Product đang chạy');

@@ -76,6 +76,7 @@ exports.getAllProducts = async (req, res) => {
 };
 
 // ADMIN: create product (bill) - only name + image + obVersion + category
+// Note: checkUploadLimit middleware sẽ được áp dụng ở route level
 exports.createProduct = async (req, res) => {
   try {
     const { name, obVersion, category } = req.body;

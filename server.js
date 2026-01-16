@@ -2,6 +2,7 @@ const app = require('./app');
 const connectDB = require('./config/db');
 const Admin = require('./models/Admin');
 const Product = require('./models/Product');
+const { checkAndUpdatePayments } = require('./services/bankTransactionService');
 
 const PORT = process.env.PORT || 5000;
 
@@ -40,7 +41,37 @@ connectDB()
 
     app.listen(PORT, () => {
       console.log(`Server đang chạy trên port ${PORT}`);
+      console.log('[Cron] Đang khởi động cron job kiểm tra thanh toán mỗi 15 giây...');
     });
+
+    // Cron job: Check thanh toán mỗi 15 giây
+    setInterval(async () => {
+      try {
+        const result = await checkAndUpdatePayments();
+        if (result.checked > 0) {
+          console.log(`[Cron] ✓ Đã kiểm tra ${result.checked} payment(s)`);
+        }
+        if (result.updated > 0) {
+          console.log(`[Cron] ✓ Đã cập nhật ${result.updated} payment(s) thành công!`);
+        }
+        if (result.error) {
+          console.error(`[Cron] ✗ Lỗi: ${result.error}`);
+        }
+      } catch (error) {
+        console.error('[Cron] ✗ Lỗi khi check thanh toán:', error.message);
+      }
+    }, 15000); // 15 giây
+
+    // Chạy ngay lần đầu sau 5 giây khi server start
+    setTimeout(async () => {
+      try {
+        console.log('[Cron] Chạy kiểm tra thanh toán lần đầu...');
+        const result = await checkAndUpdatePayments();
+        console.log(`[Cron] ✓ Lần đầu: Đã kiểm tra ${result.checked} payment(s), cập nhật ${result.updated} payment(s).`);
+      } catch (error) {
+        console.error('[Cron] ✗ Lỗi khi check thanh toán lần đầu:', error.message);
+      }
+    }, 5000); // 5 giây
   })
   .catch((err) => {
     console.error('DB connection failed:', err);
