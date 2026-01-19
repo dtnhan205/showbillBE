@@ -1,13 +1,27 @@
 const ObVersion = require('../models/ObVersion');
+const Product = require('../models/Product');
 
 // Public: list OB versions
 exports.getObVersions = async (req, res) => {
   try {
-    const { includeInactive } = req.query;
-    const filter = {};
+    const { includeInactive, adminId, page = 1, limit = 50 } = req.query;
+    if (!adminId) {
+      return res.json([]);
+    }
+
+    const filter = { adminId: String(adminId).trim() };
     if (String(includeInactive).toLowerCase() !== 'true') filter.isActive = true;
 
-    const obs = await ObVersion.find(filter).sort({ createdAt: -1 });
+    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
+    const skip = (pageNum - 1) * limitNum;
+
+    const obs = await ObVersion.find(filter)
+      .select('name slug isActive adminId createdAt')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum);
+
     res.json(obs);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -17,17 +31,21 @@ exports.getObVersions = async (req, res) => {
 // Admin: get my OB versions (only for current admin, or all for super admin)
 exports.getMyObVersions = async (req, res) => {
   try {
-    const { includeInactive } = req.query;
-    const filter = {};
-    
-    // Super admin có thể xem tất cả, admin thường chỉ xem của mình
-    if (req.admin?.role !== 'super') {
-      filter.adminId = req.admin?._id;
-    }
-    
+    const { includeInactive, page = 1, limit = 100 } = req.query;
+    const filter = { adminId: req.admin?._id };
+
     if (String(includeInactive).toLowerCase() !== 'true') filter.isActive = true;
 
-    const obs = await ObVersion.find(filter).sort({ createdAt: -1 });
+    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 500);
+    const skip = (pageNum - 1) * limitNum;
+
+    const obs = await ObVersion.find(filter)
+      .select('name slug isActive adminId createdAt')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum);
+
     res.json(obs);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -50,10 +68,6 @@ exports.createObVersion = async (req, res) => {
 
     res.status(201).json(item);
   } catch (err) {
-    // duplicate slug
-    if (err?.code === 11000) {
-      return res.status(409).json({ message: 'slug đã tồn tại' });
-    }
     res.status(500).json({ message: err.message });
   }
 };
@@ -77,14 +91,26 @@ exports.updateObVersion = async (req, res) => {
     const update = {};
     if (typeof name !== 'undefined') update.name = String(name).trim();
     if (typeof slug !== 'undefined') update.slug = String(slug).trim().toLowerCase();
-    if (typeof isActive !== 'undefined') update.isActive = isActive;
+    if (typeof isActive !== 'undefined') {
+      update.isActive = isActive;
+      // Nếu tắt OB thì ẩn tất cả sản phẩm liên quan
+      if (isActive === false) {
+        await Product.updateMany(
+          { obVersion: item.slug, adminId: item.adminId },
+          { $set: { isHidden: true } },
+        );
+      } else if (isActive === true) {
+        // Nếu bật lại OB thì bật lại các sản phẩm liên quan
+        await Product.updateMany(
+          { obVersion: item.slug, adminId: item.adminId },
+          { $set: { isHidden: false } },
+        );
+      }
+    }
 
     const updated = await ObVersion.findByIdAndUpdate(id, update, { new: true });
     res.json(updated);
   } catch (err) {
-    if (err?.code === 11000) {
-      return res.status(409).json({ message: 'slug đã tồn tại' });
-    }
     res.status(500).json({ message: err.message });
   }
 };
@@ -104,6 +130,11 @@ exports.deleteObVersion = async (req, res) => {
     }
 
     await ObVersion.findByIdAndDelete(id);
+    // Ẩn tất cả sản phẩm liên quan khi xóa OB
+    await Product.updateMany(
+      { obVersion: item.slug, adminId: item.adminId },
+      { $set: { isHidden: true } },
+    );
     res.json({ message: 'Xóa thành công' });
   } catch (err) {
     res.status(500).json({ message: err.message });

@@ -1,13 +1,26 @@
 const Category = require('../models/Category');
+const Product = require('../models/Product');
 
 // Public: list categories
 exports.getCategories = async (req, res) => {
   try {
-    const { includeInactive } = req.query;
-    const filter = {};
+    const { includeInactive, adminId, page = 1, limit = 50 } = req.query;
+    if (!adminId) {
+      return res.json([]);
+    }
+    const filter = { adminId: String(adminId).trim() };
     if (String(includeInactive).toLowerCase() !== 'true') filter.isActive = true;
 
-    const categories = await Category.find(filter).sort({ createdAt: -1 });
+    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
+    const skip = (pageNum - 1) * limitNum;
+
+    const categories = await Category.find(filter)
+      .select('name slug isActive adminId createdAt')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum);
+
     res.json(categories);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -17,17 +30,21 @@ exports.getCategories = async (req, res) => {
 // Admin: get my categories (only for current admin, or all for super admin)
 exports.getMyCategories = async (req, res) => {
   try {
-    const { includeInactive } = req.query;
-    const filter = {};
-    
-    // Super admin có thể xem tất cả, admin thường chỉ xem của mình
-    if (req.admin?.role !== 'super') {
-      filter.adminId = req.admin?._id;
-    }
-    
+    const { includeInactive, page = 1, limit = 100 } = req.query;
+    const filter = { adminId: req.admin?._id };
+
     if (String(includeInactive).toLowerCase() !== 'true') filter.isActive = true;
 
-    const categories = await Category.find(filter).sort({ createdAt: -1 });
+    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 500);
+    const skip = (pageNum - 1) * limitNum;
+
+    const categories = await Category.find(filter)
+      .select('name slug isActive adminId createdAt')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum);
+
     res.json(categories);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -50,9 +67,6 @@ exports.createCategory = async (req, res) => {
 
     res.status(201).json(item);
   } catch (err) {
-    if (err?.code === 11000) {
-      return res.status(409).json({ message: 'slug đã tồn tại' });
-    }
     res.status(500).json({ message: err.message });
   }
 };
@@ -76,14 +90,26 @@ exports.updateCategory = async (req, res) => {
     const update = {};
     if (typeof name !== 'undefined') update.name = String(name).trim();
     if (typeof slug !== 'undefined') update.slug = String(slug).trim().toLowerCase();
-    if (typeof isActive !== 'undefined') update.isActive = isActive;
+    if (typeof isActive !== 'undefined') {
+      update.isActive = isActive;
+      // Nếu tắt category thì ẩn tất cả sản phẩm liên quan
+      if (isActive === false) {
+        await Product.updateMany(
+          { category: item.slug, adminId: item.adminId },
+          { $set: { isHidden: true } },
+        );
+      } else if (isActive === true) {
+        // Nếu bật lại category thì bật lại các sản phẩm liên quan
+        await Product.updateMany(
+          { category: item.slug, adminId: item.adminId },
+          { $set: { isHidden: false } },
+        );
+      }
+    }
 
     const updated = await Category.findByIdAndUpdate(id, update, { new: true });
     res.json(updated);
   } catch (err) {
-    if (err?.code === 11000) {
-      return res.status(409).json({ message: 'slug đã tồn tại' });
-    }
     res.status(500).json({ message: err.message });
   }
 };
@@ -103,6 +129,11 @@ exports.deleteCategory = async (req, res) => {
     }
 
     await Category.findByIdAndDelete(id);
+    // Ẩn tất cả sản phẩm liên quan khi xóa category
+    await Product.updateMany(
+      { category: item.slug, adminId: item.adminId },
+      { $set: { isHidden: true } },
+    );
     res.json({ message: 'Xóa thành công' });
   } catch (err) {
     res.status(500).json({ message: err.message });

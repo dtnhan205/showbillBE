@@ -1,6 +1,7 @@
 const axios = require('axios');
 const Payment = require('../models/Payment');
 const Admin = require('../models/Admin');
+const { validateAndCleanAvatarFrame } = require('../controllers/adminController');
 
 /**
  * Service để check lịch sử giao dịch ngân hàng
@@ -185,6 +186,8 @@ async function checkAndUpdatePayments() {
             // Nếu chưa có activePackage hoặc activePackage là basic, tự động set gói mới làm active
             if (!admin.activePackage || admin.activePackage === 'basic') {
               admin.activePackage = payment.packageType;
+              // Kiểm tra và xóa avatarFrame nếu không phù hợp với gói mới (khi upgrade)
+              validateAndCleanAvatarFrame(admin, payment.packageType);
             }
 
             // Giữ package và packageExpiry để backward compatibility

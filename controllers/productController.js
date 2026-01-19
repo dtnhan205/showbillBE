@@ -1,4 +1,6 @@
 const Product = require('../models/Product');
+const fs = require('fs');
+const path = require('path');
 
 /**
  * PUBLIC: GET /api/products
@@ -11,7 +13,7 @@ const Product = require('../models/Product');
  */
 exports.getProducts = async (req, res) => {
   try {
-    const { adminId, obVersion, category, search, includeHidden } = req.query;
+    const { adminId, obVersion, category, search, includeHidden, page = 1, limit = 60 } = req.query;
 
     const filter = {};
 
@@ -36,7 +38,16 @@ exports.getProducts = async (req, res) => {
       filter.name = { $regex: String(search).trim(), $options: 'i' };
     }
 
-    const products = await Product.find(filter).sort({ createdAt: -1 });
+    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 60, 1), 200);
+    const skip = (pageNum - 1) * limitNum;
+
+    const products = await Product.find(filter)
+      .select('name imageUrl imageBase64 obVersion category views isHidden adminId createdAt')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum);
+
     res.json(products);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -50,7 +61,16 @@ exports.getProducts = async (req, res) => {
 exports.getMyProducts = async (req, res) => {
   try {
     const adminId = req.admin?._id;
-    const products = await Product.find({ adminId }).sort({ createdAt: -1 });
+    const { page = 1, limit = 200 } = req.query;
+    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 500);
+    const skip = (pageNum - 1) * limitNum;
+
+    const products = await Product.find({ adminId })
+      .select('name imageUrl imageBase64 obVersion category views isHidden adminId createdAt')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum);
     res.json(products);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -68,7 +88,16 @@ exports.getAllProducts = async (req, res) => {
       return res.status(403).json({ message: 'Chỉ super admin mới có quyền truy cập' });
     }
     
-    const products = await Product.find({}).sort({ createdAt: -1 });
+    const { page = 1, limit = 200 } = req.query;
+    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 500);
+    const skip = (pageNum - 1) * limitNum;
+
+    const products = await Product.find({})
+      .select('name imageUrl imageBase64 obVersion category views isHidden adminId createdAt')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum);
     res.json(products);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -84,14 +113,15 @@ exports.createProduct = async (req, res) => {
     if (!name) return res.status(400).json({ message: 'Vui lòng nhập tên bill' });
     if (!req.file) return res.status(400).json({ message: 'Vui lòng upload ảnh bill' });
 
-    const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+    // Lưu file và lấy URL path
+    const imageUrl = `/uploads/products/${req.file.filename}`;
 
     const obSlug = (obVersion ? String(obVersion) : 'ob51').trim().toLowerCase();
     const catSlug = (category ? String(category) : 'other').trim().toLowerCase();
 
     const product = await Product.create({
       name,
-      imageBase64: base64Image,
+      imageUrl,
       obVersion: obSlug,
       category: catSlug,
       adminId: req.admin._id,
@@ -165,7 +195,9 @@ exports.createMultipleProducts = async (req, res) => {
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       const name = nameArray[i] || `Bill ${i + 1}`;
-      const base64Image = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+      
+      // Lưu file và lấy URL path
+      const imageUrl = `/uploads/products/${file.filename}`;
 
       // Sử dụng OB và Category riêng cho từng bill, fallback về default nếu không có
       const obSlug = (obVersionsArray[i] ? String(obVersionsArray[i]) : defaultOb).trim().toLowerCase();
@@ -173,7 +205,7 @@ exports.createMultipleProducts = async (req, res) => {
 
       const product = await Product.create({
         name: name.trim(),
-        imageBase64: base64Image,
+        imageUrl,
         obVersion: obSlug,
         category: catSlug,
         adminId: req.admin._id,
@@ -214,8 +246,16 @@ exports.updateProduct = async (req, res) => {
     if (typeof category !== 'undefined') product.category = String(category).trim().toLowerCase();
 
     if (req.file) {
-      const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
-      product.imageBase64 = base64Image;
+      // Xóa file cũ nếu có
+      if (product.imageUrl && product.imageUrl.startsWith('/uploads/products/')) {
+        const oldFilePath = path.join(__dirname, '..', product.imageUrl);
+        if (fs.existsSync(oldFilePath)) {
+          fs.unlinkSync(oldFilePath);
+        }
+      }
+      
+      // Lưu file mới và cập nhật URL
+      product.imageUrl = `/uploads/products/${req.file.filename}`;
     }
 
     await product.save();
@@ -236,6 +276,14 @@ exports.deleteProduct = async (req, res) => {
     const isSuper = req.admin.role === 'super';
     if (!isOwner && !isSuper) {
       return res.status(403).json({ message: 'Bạn không có quyền xóa bill này' });
+    }
+
+    // Xóa file ảnh nếu có
+    if (product.imageUrl && product.imageUrl.startsWith('/uploads/products/')) {
+      const filePath = path.join(__dirname, '..', product.imageUrl);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
     }
 
     await Product.findByIdAndDelete(id);

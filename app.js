@@ -5,10 +5,16 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 const app = express();
+const { perfLogger } = require('./middleware/perfLogger');
 
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+app.use(perfLogger({ slowMs: Number(process.env.SLOW_API_MS || 800) }));
+
+// Serve static files (images)
+const path = require('path');
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Routes
 app.use('/api/auth', require('./routes/authRoutes'));

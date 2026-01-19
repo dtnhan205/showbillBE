@@ -4,6 +4,7 @@ const BankAccount = require('../models/BankAccount');
 const Admin = require('../models/Admin');
 const Product = require('../models/Product');
 const mongoose = require('mongoose');
+const { validateAndCleanAvatarFrame } = require('./adminController');
 
 // Helper: Tạo mã nội dung chuyển khoản unique (dtnxxxxx)
 async function generateTransferContent() {
@@ -63,9 +64,12 @@ exports.getMyPackage = async (req, res) => {
 
     // Nếu activePackage không phải basic, kiểm tra xem còn hợp lệ không
     if (currentPackage !== 'basic') {
-      const activePkg = validPackages.find((pkg) => pkg.packageType === currentPackage);
+      // So sánh không phân biệt hoa thường để tránh lỗi
+      const activePkg = validPackages.find(
+        (pkg) => pkg.packageType?.toLowerCase() === currentPackage?.toLowerCase()
+      );
       if (!activePkg) {
-        // Gói đang active đã hết hạn, chuyển về basic hoặc gói còn hạn đầu tiên
+        // Gói đang active đã hết hạn hoặc không có trong ownedPackages, chuyển về basic hoặc gói còn hạn đầu tiên
         if (validPackages.length > 0) {
           currentPackage = validPackages[0].packageType;
           packageExpiry = validPackages[0].expiryDate;
@@ -76,6 +80,8 @@ exports.getMyPackage = async (req, res) => {
         admin.activePackage = currentPackage;
         admin.package = currentPackage;
         admin.packageExpiry = packageExpiry;
+        // Kiểm tra và xóa avatarFrame nếu không phù hợp với gói mới
+        validateAndCleanAvatarFrame(admin, currentPackage);
         await admin.save();
       } else {
         packageExpiry = activePkg.expiryDate;
@@ -310,6 +316,8 @@ exports.verifyPayment = async (req, res) => {
       // Nếu chưa có activePackage hoặc activePackage là basic, tự động set gói mới làm active
       if (!admin.activePackage || admin.activePackage === 'basic') {
         admin.activePackage = payment.packageType;
+        // Kiểm tra và xóa avatarFrame nếu không phù hợp với gói mới (khi upgrade)
+        validateAndCleanAvatarFrame(admin, payment.packageType);
       }
 
       // Giữ package và packageExpiry để backward compatibility
@@ -349,6 +357,8 @@ exports.switchPackage = async (req, res) => {
       admin.activePackage = 'basic';
       admin.package = 'basic';
       admin.packageExpiry = null;
+      // Kiểm tra và xóa avatarFrame nếu không phù hợp với gói basic
+      validateAndCleanAvatarFrame(admin, 'basic');
       await admin.save();
       return res.json({ message: 'Đã chuyển sang gói Basic.', activePackage: 'basic' });
     }
@@ -374,6 +384,8 @@ exports.switchPackage = async (req, res) => {
     admin.activePackage = packageType;
     admin.package = packageType;
     admin.packageExpiry = targetPackage.expiryDate;
+    // Kiểm tra và xóa avatarFrame nếu không phù hợp với gói mới
+    validateAndCleanAvatarFrame(admin, packageType);
     await admin.save();
 
     res.json({

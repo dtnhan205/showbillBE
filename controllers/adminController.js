@@ -2,6 +2,9 @@ const mongoose = require('mongoose');
 const Admin = require('../models/Admin');
 const Product = require('../models/Product');
 const ViewStat = require('../models/ViewStat');
+const AdminReport = require('../models/AdminReport');
+const fs = require('fs');
+const path = require('path');
 
 // Helper function: Lấy ngày theo timezone Việt Nam (UTC+7)
 function getVietnamDate(date = new Date()) {
@@ -34,7 +37,7 @@ function getVietnamTodayStart() {
 exports.getAllAdmins = async (req, res) => {
   try {
     const admins = await Admin.find({})
-      .select('username email role displayName bio avatarBase64 bannerBase64 isActive createdAt updatedAt')
+      .select('username email role displayName bio avatarBase64 bannerBase64 isActive package packageExpiry activePackage ownedPackages createdAt updatedAt')
       .sort({ createdAt: -1 });
 
     res.json(admins);
@@ -87,6 +90,22 @@ exports.getMyProfile = async (req, res) => {
   }
 };
 
+// Helper: Xác định gói tối thiểu cần thiết cho một khung
+function getRequiredPackageForFrame(framePath) {
+  if (!framePath) return null;
+  
+  // Extract package từ frame path (e.g., 'basic/basic1.gif' -> 'basic')
+  const framePackage = framePath.split('/')[0].toLowerCase();
+  
+  // Basic không cần nâng cấp (đã có sẵn)
+  if (framePackage === 'basic') {
+    return null;
+  }
+  
+  // Trả về tên gói với chữ cái đầu viết hoa
+  return framePackage.charAt(0).toUpperCase() + framePackage.slice(1);
+}
+
 // Helper: Validate frame theo gói
 function validateFrameForPackage(framePath, activePackage) {
   if (!framePath) return true; // Cho phép xóa frame (empty string)
@@ -119,13 +138,33 @@ function validateFrameForPackage(framePath, activePackage) {
   }
 }
 
+// Helper: Kiểm tra và xóa avatarFrame nếu không phù hợp với gói mới
+// Export để các controller khác có thể dùng
+exports.validateAndCleanAvatarFrame = function(admin, newPackage) {
+  if (!admin || !admin.avatarFrame) {
+    return; // Không có frame, không cần xóa
+  }
+  
+  const framePath = String(admin.avatarFrame).trim();
+  if (!framePath) {
+    return; // Frame đã rỗng, không cần xóa
+  }
+  
+  // Kiểm tra xem frame có phù hợp với gói mới không
+  if (!validateFrameForPackage(framePath, newPackage)) {
+    // Frame không phù hợp, xóa nó
+    admin.avatarFrame = '';
+    console.log(`[validateAndCleanAvatarFrame] Đã xóa avatarFrame "${framePath}" vì không phù hợp với gói "${newPackage}"`);
+  }
+};
+
 // PUT /api/admin/profile (admin update profile)
 exports.updateMyProfile = async (req, res) => {
   try {
     const adminId = req.admin._id;
-    const { displayName, bio, avatarBase64, bannerBase64, avatarFrame } = req.body;
+    const { displayName, bio, avatarFrame } = req.body;
 
-    // Lấy admin hiện tại để kiểm tra activePackage
+    // Lấy admin hiện tại để kiểm tra activePackage và xóa file cũ
     const currentAdmin = await Admin.findById(adminId);
     if (!currentAdmin) {
       return res.status(404).json({ message: 'Không tìm thấy admin.' });
@@ -134,8 +173,34 @@ exports.updateMyProfile = async (req, res) => {
     const update = {};
     if (typeof displayName !== 'undefined') update.displayName = String(displayName).trim();
     if (typeof bio !== 'undefined') update.bio = String(bio);
-    if (typeof avatarBase64 !== 'undefined') update.avatarBase64 = String(avatarBase64);
-    if (typeof bannerBase64 !== 'undefined') update.bannerBase64 = String(bannerBase64);
+    
+    // Xử lý avatar upload (file) - multer fields trả về object với keys là field names
+    if (req.files && req.files.avatar && req.files.avatar.length > 0) {
+      // Xóa file avatar cũ nếu có
+      if (currentAdmin.avatarUrl && currentAdmin.avatarUrl.startsWith('/uploads/avatars/')) {
+        const oldFilePath = path.join(__dirname, '..', currentAdmin.avatarUrl);
+        if (fs.existsSync(oldFilePath)) {
+          fs.unlinkSync(oldFilePath);
+        }
+      }
+      update.avatarUrl = `/uploads/avatars/${req.files.avatar[0].filename}`;
+    }
+    
+    // Xử lý banner upload (file)
+    if (req.files && req.files.banner && req.files.banner.length > 0) {
+      // Xóa file banner cũ nếu có
+      if (currentAdmin.bannerUrl && currentAdmin.bannerUrl.startsWith('/uploads/banners/')) {
+        const oldFilePath = path.join(__dirname, '..', currentAdmin.bannerUrl);
+        if (fs.existsSync(oldFilePath)) {
+          fs.unlinkSync(oldFilePath);
+        }
+      }
+      update.bannerUrl = `/uploads/banners/${req.files.banner[0].filename}`;
+    }
+    
+    // Backward compatibility: vẫn hỗ trợ base64 nếu frontend gửi (sẽ migrate sau)
+    if (typeof req.body.avatarBase64 !== 'undefined') update.avatarBase64 = String(req.body.avatarBase64);
+    if (typeof req.body.bannerBase64 !== 'undefined') update.bannerBase64 = String(req.body.bannerBase64);
     
     // Xử lý avatarFrame
     if (typeof avatarFrame !== 'undefined') {
@@ -145,8 +210,13 @@ exports.updateMyProfile = async (req, res) => {
       if (trimmedFrame) {
         const activePackage = currentAdmin.activePackage || 'basic';
         if (!validateFrameForPackage(trimmedFrame, activePackage)) {
+          // Xác định gói cần thiết cho khung này
+          const requiredPackage = getRequiredPackageForFrame(trimmedFrame);
+          const errorMessage = requiredPackage 
+            ? `Vui lòng nâng cấp gói ${requiredPackage} để sử dụng khung này.`
+            : 'Vui lòng nâng cấp gói để sử dụng khung này.';
           return res.status(400).json({ 
-            message: 'Vui lòng nâng cấp gói để sử dụng khung này.' 
+            message: errorMessage
           });
         }
         
@@ -622,6 +692,213 @@ exports.getSystemChartData = async (req, res) => {
         date: item.date,
         count: item.admins,
       })),
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// GET /api/admin/reports (super admin)
+exports.getAdminReports = async (req, res) => {
+  try {
+    const reportsAgg = await AdminReport.aggregate([
+      { $sort: { createdAt: -1 } },
+      {
+        $group: {
+          _id: '$targetAdminId',
+          count: { $sum: 1 },
+          pendingCount: { $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] } },
+          resolvedCount: { $sum: { $cond: [{ $eq: ['$status', 'resolved'] }, 1, 0] } },
+          lastReason: { $first: '$reason' },
+          lastReporterName: { $first: '$reporterName' },
+          lastReporterZalo: { $first: '$reporterZalo' },
+          lastStatus: { $first: '$status' },
+          lastAt: { $first: '$createdAt' },
+        },
+      },
+      { $sort: { pendingCount: -1, lastAt: -1 } },
+    ]);
+
+    const adminIds = reportsAgg.map((r) => r._id).filter(Boolean);
+    const admins = await Admin.find({ _id: { $in: adminIds } })
+      .select('displayName username email role isActive isPublicHidden reportCount createdAt');
+    const adminMap = new Map(admins.map((a) => [String(a._id), a]));
+
+    const result = reportsAgg
+      .map((r) => {
+        const admin = adminMap.get(String(r._id));
+        if (!admin) return null;
+        return {
+          adminId: admin._id,
+          displayName: admin.displayName || admin.username,
+          username: admin.username,
+          email: admin.email,
+          role: admin.role,
+          isActive: admin.isActive,
+          isPublicHidden: admin.isPublicHidden,
+          reportCount: admin.reportCount ?? 0,
+          totalReports: r.count,
+          pendingReports: r.pendingCount,
+          resolvedReports: r.resolvedCount,
+          lastReason: r.lastReason,
+          lastReporterName: r.lastReporterName,
+          lastReporterZalo: r.lastReporterZalo,
+          lastStatus: r.lastStatus,
+          lastAt: r.lastAt,
+          createdAt: admin.createdAt,
+        };
+      })
+      .filter(Boolean);
+
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// PATCH /api/admin/reports/:id/toggle-hide (super admin)
+exports.toggleAdminPublicHidden = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const admin = await Admin.findById(id).select('-password');
+    if (!admin) return res.status(404).json({ message: 'Không tìm thấy admin' });
+    if (admin.role === 'super') return res.status(400).json({ message: 'Không thể ẩn super admin' });
+
+    admin.isPublicHidden = !admin.isPublicHidden;
+    await admin.save();
+
+    res.json({
+      message: admin.isPublicHidden ? 'Đã ẩn admin khỏi public.' : 'Đã hiển thị lại admin.',
+      admin,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// GET /api/admin/reports/:id/details (super admin) - Lấy chi tiết tất cả reports của một admin
+exports.getAdminReportDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.query; // Optional filter: 'pending' or 'resolved'
+    const admin = await Admin.findById(id).select('displayName username email role');
+    if (!admin) return res.status(404).json({ message: 'Không tìm thấy admin' });
+
+    const query = { targetAdminId: id };
+    if (status === 'pending' || status === 'resolved') {
+      query.status = status;
+    }
+
+    const reports = await AdminReport.find(query)
+      .sort({ createdAt: -1 })
+      .select('reporterName reporterZalo reason status ip userAgent createdAt resolvedAt resolvedBy')
+      .populate('resolvedBy', 'username displayName')
+      .lean();
+
+    const pendingCount = await AdminReport.countDocuments({ targetAdminId: id, status: 'pending' });
+    const resolvedCount = await AdminReport.countDocuments({ targetAdminId: id, status: 'resolved' });
+
+    res.json({
+      admin: {
+        _id: admin._id,
+        displayName: admin.displayName || admin.username,
+        username: admin.username,
+        email: admin.email,
+        role: admin.role,
+      },
+      reports: reports.map((r) => ({
+        _id: r._id,
+        reporterName: r.reporterName,
+        reporterZalo: r.reporterZalo,
+        reason: r.reason,
+        status: r.status,
+        ip: r.ip,
+        userAgent: r.userAgent,
+        createdAt: r.createdAt,
+        resolvedAt: r.resolvedAt,
+        resolvedBy: r.resolvedBy ? {
+          _id: r.resolvedBy._id,
+          username: r.resolvedBy.username,
+          displayName: r.resolvedBy.displayName || r.resolvedBy.username,
+        } : null,
+      })),
+      total: reports.length,
+      pendingCount,
+      resolvedCount,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// PATCH /api/admin/reports/:reportId/status (super admin) - Cập nhật trạng thái report
+exports.updateReportStatus = async (req, res) => {
+  try {
+    const { reportId } = req.params;
+    const { status } = req.body;
+
+    if (!status || !['pending', 'resolved'].includes(status)) {
+      return res.status(400).json({ message: 'Status phải là "pending" hoặc "resolved"' });
+    }
+
+    const report = await AdminReport.findById(reportId);
+    if (!report) return res.status(404).json({ message: 'Không tìm thấy report' });
+
+    // Không cho phép chuyển từ resolved về pending (chỉ cho phép một chiều)
+    if (report.status === 'resolved' && status === 'pending') {
+      return res.status(400).json({ message: 'Không thể chuyển report đã xử lý về trạng thái chờ xử lý' });
+    }
+
+    // Chỉ cho phép chuyển từ pending sang resolved
+    if (report.status === 'pending' && status === 'resolved') {
+      report.status = 'resolved';
+      report.resolvedAt = new Date();
+      report.resolvedBy = req.admin._id;
+    } else if (report.status === 'resolved' && status === 'resolved') {
+      // Đã resolved rồi, không làm gì cả
+      return res.status(400).json({ message: 'Report này đã được xử lý rồi' });
+    }
+
+    await report.save();
+
+    res.json({
+      message: `Đã đánh dấu report là đã xử lý.`,
+      report: {
+        _id: report._id,
+        status: report.status,
+        resolvedAt: report.resolvedAt,
+        resolvedBy: report.resolvedBy,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// DELETE /api/admin/reports/:id/reset (super admin) - Reset report count và xóa tất cả reports
+exports.resetAdminReports = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const admin = await Admin.findById(id).select('role reportCount isPublicHidden');
+    if (!admin) return res.status(404).json({ message: 'Không tìm thấy admin' });
+    if (admin.role === 'super') return res.status(400).json({ message: 'Không thể reset reports của super admin' });
+
+    // Xóa tất cả reports của admin này
+    const deleteResult = await AdminReport.deleteMany({ targetAdminId: id });
+
+    // Reset report count và hiển thị lại admin
+    admin.reportCount = 0;
+    admin.isPublicHidden = false;
+    await admin.save();
+
+    res.json({
+      message: `Đã xóa ${deleteResult.deletedCount} báo cáo và reset report count của admin.`,
+      deletedCount: deleteResult.deletedCount,
+      admin: {
+        _id: admin._id,
+        reportCount: admin.reportCount,
+        isPublicHidden: admin.isPublicHidden,
+      },
     });
   } catch (err) {
     res.status(500).json({ message: err.message });

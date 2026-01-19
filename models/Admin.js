@@ -13,9 +13,16 @@ const adminSchema = new mongoose.Schema(
     // Trạng thái tài khoản (cho phép super admin tạm khóa)
     isActive: { type: Boolean, default: true },
 
+    // Public moderation flags
+    isPublicHidden: { type: Boolean, default: false },
+    reportCount: { type: Number, default: 0 },
+
     // Public profile fields
     displayName: { type: String, trim: true },
     bio: { type: String, default: '', trim: true },
+    avatarUrl: { type: String, default: '' }, // URL path: /uploads/avatars/filename.jpg
+    bannerUrl: { type: String, default: '' }, // URL path: /uploads/banners/filename.jpg
+    // Giữ base64 để backward compatibility (sẽ migrate sau)
     avatarBase64: { type: String, default: '' },
     bannerBase64: { type: String, default: '' },
     avatarFrame: { type: String, default: '', trim: true }, // Path to frame image (e.g., 'basic/basic1.gif')
@@ -78,5 +85,13 @@ adminSchema.pre('save', function () {
 adminSchema.methods.comparePassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
+
+// Indexes để tối ưu các query phổ biến:
+// - Public admins list (role + isPublicHidden + createdAt)
+adminSchema.index({ role: 1, isPublicHidden: 1, createdAt: -1 }, { background: true });
+// - Filter role + isPublicHidden (quan trọng cho query $expr - filter trước khi scan)
+adminSchema.index({ role: 1, isPublicHidden: 1 }, { background: true });
+// - Package queries
+adminSchema.index({ activePackage: 1 }, { background: true });
 
 module.exports = mongoose.model('Admin', adminSchema);
