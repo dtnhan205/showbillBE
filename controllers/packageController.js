@@ -36,7 +36,7 @@ exports.updatePackageConfig = async (req, res) => {
     }
 
     const { type } = req.params;
-    const { price, billLimit } = req.body;
+    const { price, billLimit, descriptions } = req.body;
 
     if (type === 'basic' && price !== 0) {
       return res.status(400).json({ message: 'Gói basic phải có giá 0.' });
@@ -45,6 +45,9 @@ exports.updatePackageConfig = async (req, res) => {
     const updateData = { price };
     if (billLimit !== undefined) {
       updateData.billLimit = billLimit;
+    }
+    if (descriptions !== undefined) {
+      updateData.descriptions = Array.isArray(descriptions) ? descriptions : [];
     }
 
     const config = await PackageConfig.findOneAndUpdate(
@@ -178,7 +181,7 @@ exports.createPackageConfig = async (req, res) => {
       return res.status(403).json({ message: 'Chỉ super admin mới có quyền truy cập.' });
     }
 
-    const { packageType, price, billLimit } = req.body;
+    const { packageType, price, billLimit, descriptions } = req.body;
 
     if (!packageType) {
       return res.status(400).json({ message: 'Vui lòng nhập loại gói.' });
@@ -199,6 +202,11 @@ exports.createPackageConfig = async (req, res) => {
       return res.status(400).json({ message: 'Giới hạn bill không hợp lệ. (-1 = không giới hạn)' });
     }
 
+    // Validate descriptions
+    if (descriptions !== undefined && !Array.isArray(descriptions)) {
+      return res.status(400).json({ message: 'Descriptions phải là một mảng.' });
+    }
+
     // Xác định màu cho gói
     let packageColor;
     if (packageType === 'pro') {
@@ -215,6 +223,7 @@ exports.createPackageConfig = async (req, res) => {
       price,
       billLimit: billLimit || (packageType === 'basic' ? 20 : packageType === 'pro' ? 100 : -1),
       color: packageColor,
+      descriptions: descriptions || [],
     });
 
     await config.save();

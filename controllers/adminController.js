@@ -249,25 +249,90 @@ exports.updateMyProfile = async (req, res) => {
 exports.getMyStats = async (req, res) => {
   try {
     const adminId = req.admin._id;
+    const period = req.query.period || 'month';
+    const weekParam = req.query.week;
+    const monthParam = req.query.month;
+    const yearParam = req.query.year;
+    
+    // Tính ngày bắt đầu và kết thúc dựa trên period (giống chart)
+    let startDate = new Date();
+    let endDate = new Date();
+    const currentYear = new Date().getFullYear();
+    
+    if (period === 'week') {
+      if (weekParam) {
+        const parts = weekParam.split(' - ');
+        if (parts.length === 2) {
+          const part1 = parts[0].trim().split('/');
+          const part2 = parts[1].trim().split('/');
+          
+          if (part1.length === 3 && part2.length === 3) {
+            const [day1, month1, year1] = part1.map(Number);
+            const [day2, month2, year2] = part2.map(Number);
+            startDate = new Date(`${year1}-${String(month1).padStart(2, '0')}-${String(day1).padStart(2, '0')}T00:00:00+07:00`);
+            endDate = new Date(`${year2}-${String(month2).padStart(2, '0')}-${String(day2).padStart(2, '0')}T23:59:59+07:00`);
+          } else {
+            const [day1, month1] = part1.map(Number);
+            const [day2, month2] = part2.map(Number);
+            const year1 = parseInt(month1) === 12 ? currentYear - 1 : currentYear;
+            const year2 = parseInt(month2) === 1 && parseInt(month1) === 12 ? currentYear : currentYear;
+            startDate = new Date(`${year1}-${String(month1).padStart(2, '0')}-${String(day1).padStart(2, '0')}T00:00:00+07:00`);
+            endDate = new Date(`${year2}-${String(month2).padStart(2, '0')}-${String(day2).padStart(2, '0')}T23:59:59+07:00`);
+          }
+        }
+      } else {
+        const today = getVietnamTodayStart();
+        const dayOfWeek = today.getDay();
+        const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        startDate = new Date(today);
+        startDate.setDate(today.getDate() - daysToMonday);
+        endDate = new Date(startDate);
+        endDate.setDate(startDate.getDate() + 6);
+        endDate.setHours(23, 59, 59, 999);
+      }
+    } else if (period === 'month') {
+      if (monthParam) {
+        const monthMatch = monthParam.match(/Tháng (\d+)/);
+        if (monthMatch) {
+          const monthNum = parseInt(monthMatch[1]);
+          const year = yearParam ? parseInt(yearParam) : currentYear;
+          startDate = new Date(`${year}-${String(monthNum).padStart(2, '0')}-01T00:00:00+07:00`);
+          const lastDayOfMonth = new Date(year, monthNum, 0);
+          endDate = new Date(`${year}-${String(monthNum).padStart(2, '0')}-${String(lastDayOfMonth.getDate()).padStart(2, '0')}T23:59:59+07:00`);
+        }
+      } else {
+        const today = getVietnamTodayStart();
+        startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+        startDate.setHours(0, 0, 0, 0);
+        const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+        endDate = new Date(today.getFullYear(), today.getMonth(), lastDay.getDate());
+        endDate.setHours(23, 59, 59, 999);
+      }
+    } else if (period === 'year') {
+      const year = yearParam ? parseInt(yearParam) : currentYear;
+      startDate = new Date(`${year}-01-01T00:00:00+07:00`);
+      endDate = new Date(`${year}-12-31T23:59:59+07:00`);
+    }
 
-    // Tổng bill và bill hiển thị vẫn lấy từ Product
-    const totalBills = await Product.countDocuments({ adminId });
-    const totalVisibleBills = await Product.countDocuments({ adminId, isHidden: false });
-    // Tổng lượt xem = tổng views của tất cả products (giống với chart)
-    const viewsAgg = await Product.aggregate([
-      {
-        $match: {
-          adminId: new mongoose.Types.ObjectId(adminId),
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          totalViews: { $sum: '$views' },
-        },
-      },
-    ]);
-    const totalViews = viewsAgg?.[0]?.totalViews ?? 0;
+    // Tổng bill trong khoảng thời gian
+    const totalBills = await Product.countDocuments({ 
+      adminId,
+      createdAt: { $gte: startDate, $lte: endDate }
+    });
+    const totalVisibleBills = await Product.countDocuments({ 
+      adminId, 
+      isHidden: false,
+      createdAt: { $gte: startDate, $lte: endDate }
+    });
+    
+    // Tổng lượt xem từ ViewStat trong khoảng thời gian (dùng date field)
+    const startDateStr = getVietnamDate(startDate);
+    const endDateStr = getVietnamDate(endDate);
+    const viewsStats = await ViewStat.find({
+      adminId: new mongoose.Types.ObjectId(adminId),
+      date: { $gte: startDateStr, $lte: endDateStr }
+    });
+    const totalViews = viewsStats.reduce((sum, stat) => sum + (stat.views || 0), 0);
 
     res.json({ totalBills, totalVisibleBills, totalViews });
   } catch (err) {
@@ -278,13 +343,95 @@ exports.getMyStats = async (req, res) => {
 // GET /api/admin/system-stats (super admin)
 exports.getSystemStats = async (req, res) => {
   try {
+    const period = req.query.period || 'month';
+    const weekParam = req.query.week;
+    const monthParam = req.query.month;
+    const yearParam = req.query.year;
+    
+    // Tính ngày bắt đầu và kết thúc dựa trên period (giống chart)
+    let startDate = new Date();
+    let endDate = new Date();
+    const currentYear = new Date().getFullYear();
+    
+    if (period === 'week') {
+      if (weekParam) {
+        const parts = weekParam.split(' - ');
+        if (parts.length === 2) {
+          const part1 = parts[0].trim().split('/');
+          const part2 = parts[1].trim().split('/');
+          
+          if (part1.length === 3 && part2.length === 3) {
+            const [day1, month1, year1] = part1.map(Number);
+            const [day2, month2, year2] = part2.map(Number);
+            startDate = new Date(`${year1}-${String(month1).padStart(2, '0')}-${String(day1).padStart(2, '0')}T00:00:00+07:00`);
+            endDate = new Date(`${year2}-${String(month2).padStart(2, '0')}-${String(day2).padStart(2, '0')}T23:59:59+07:00`);
+          } else {
+            const [day1, month1] = part1.map(Number);
+            const [day2, month2] = part2.map(Number);
+            const year1 = parseInt(month1) === 12 ? currentYear - 1 : currentYear;
+            const year2 = parseInt(month2) === 1 && parseInt(month1) === 12 ? currentYear : currentYear;
+            startDate = new Date(`${year1}-${String(month1).padStart(2, '0')}-${String(day1).padStart(2, '0')}T00:00:00+07:00`);
+            endDate = new Date(`${year2}-${String(month2).padStart(2, '0')}-${String(day2).padStart(2, '0')}T23:59:59+07:00`);
+          }
+        }
+      } else {
+        const today = getVietnamTodayStart();
+        const dayOfWeek = today.getDay();
+        const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        startDate = new Date(today);
+        startDate.setDate(today.getDate() - daysToMonday);
+        endDate = new Date(startDate);
+        endDate.setDate(startDate.getDate() + 6);
+        endDate.setHours(23, 59, 59, 999);
+      }
+    } else if (period === 'month') {
+      if (monthParam) {
+        const monthMatch = monthParam.match(/Tháng (\d+)/);
+        if (monthMatch) {
+          const monthNum = parseInt(monthMatch[1]);
+          const year = yearParam ? parseInt(yearParam) : currentYear;
+          startDate = new Date(`${year}-${String(monthNum).padStart(2, '0')}-01T00:00:00+07:00`);
+          const lastDayOfMonth = new Date(year, monthNum, 0);
+          endDate = new Date(`${year}-${String(monthNum).padStart(2, '0')}-${String(lastDayOfMonth.getDate()).padStart(2, '0')}T23:59:59+07:00`);
+        }
+      } else {
+        const today = getVietnamTodayStart();
+        startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+        startDate.setHours(0, 0, 0, 0);
+        const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+        endDate = new Date(today.getFullYear(), today.getMonth(), lastDay.getDate());
+        endDate.setHours(23, 59, 59, 999);
+      }
+    } else if (period === 'year') {
+      const year = yearParam ? parseInt(yearParam) : currentYear;
+      startDate = new Date(`${year}-01-01T00:00:00+07:00`);
+      endDate = new Date(`${year}-12-31T23:59:59+07:00`);
+    }
+
+    // Tổng admin (không filter theo thời gian)
     const totalAdmins = await Admin.countDocuments({});
-    const totalBills = await Product.countDocuments({});
-    // Tổng lượt xem hệ thống = tổng views của tất cả products (giống với chart)
-    const totalViewsAgg = await Product.aggregate([
-      { $group: { _id: null, totalViews: { $sum: '$views' } } },
-    ]);
-    const totalViews = totalViewsAgg?.[0]?.totalViews ?? 0;
+    
+    // Tổng bill trong khoảng thời gian
+    const totalBills = await Product.countDocuments({
+      createdAt: { $gte: startDate, $lte: endDate }
+    });
+    
+    // Tổng lượt xem từ ViewStat trong khoảng thời gian
+    // Tính tổng từ tất cả ViewStat của tất cả admin (không chỉ system-wide)
+    const startDateStr = getVietnamDate(startDate);
+    const endDateStr = getVietnamDate(endDate);
+    const viewsStats = await ViewStat.find({
+      date: { $gte: startDateStr, $lte: endDateStr }
+    });
+    let totalViews = viewsStats.reduce((sum, stat) => sum + (stat.views || 0), 0);
+    
+    // Nếu ViewStat không có dữ liệu, fallback: tính từ products được tạo trong khoảng thời gian
+    if (totalViews === 0) {
+      const productsInPeriod = await Product.find({
+        createdAt: { $gte: startDate, $lte: endDate }
+      }).select('views');
+      totalViews = productsInPeriod.reduce((sum, p) => sum + (p.views || 0), 0);
+    }
 
     res.json({ totalAdmins, totalBills, totalViews });
   } catch (err) {
@@ -308,16 +455,23 @@ exports.getMyChartData = async (req, res) => {
     
     if (period === 'week') {
       if (weekParam) {
-        // Parse week string: "29/12 - 04/01"
+        // Parse week string: "29/12/2024 - 04/01/2025" or "29/12 - 04/01"
         const parts = weekParam.split(' - ');
         if (parts.length === 2) {
-          const [day1, month1] = parts[0].split('/');
-          const [day2, month2] = parts[1].split('/');
+          const part1 = parts[0].trim().split('/');
+          const part2 = parts[1].trim().split('/');
           const currentYear = new Date().getFullYear();
-          // Determine year for each date
-          const year1 = parseInt(month1) === 12 ? currentYear - 1 : currentYear;
-          const year2 = parseInt(month2) === 1 && parseInt(month1) === 12 ? currentYear : currentYear;
-          startDate = new Date(year1, parseInt(month1) - 1, parseInt(day1));
+          
+          if (part1.length === 3 && part2.length === 3) {
+            // Has year: "DD/MM/YYYY - DD/MM/YYYY"
+            const [day1, month1, year1] = part1.map(Number);
+            startDate = new Date(`${year1}-${String(month1).padStart(2, '0')}-${String(day1).padStart(2, '0')}T00:00:00+07:00`);
+          } else {
+            // No year: "DD/MM - DD/MM" - determine year
+            const [day1, month1] = part1.map(Number);
+            const year1 = parseInt(month1) === 12 ? currentYear - 1 : currentYear;
+            startDate = new Date(`${year1}-${String(month1).padStart(2, '0')}-${String(day1).padStart(2, '0')}T00:00:00+07:00`);
+          }
         }
       } else {
         // Bắt đầu từ thứ 2 của tuần hiện tại
@@ -502,17 +656,23 @@ exports.getSystemChartData = async (req, res) => {
     
     if (period === 'week') {
       if (weekParam) {
-        // Parse week string: "29/12 - 04/01"
+        // Parse week string: "29/12/2024 - 04/01/2025" or "29/12 - 04/01"
         const parts = weekParam.split(' - ');
         if (parts.length === 2) {
-          const [day1, month1] = parts[0].split('/');
-          const [day2, month2] = parts[1].split('/');
+          const part1 = parts[0].trim().split('/');
+          const part2 = parts[1].trim().split('/');
           const currentYear = new Date().getFullYear();
-          // Determine year for each date
-          const year1 = parseInt(month1) === 12 ? currentYear - 1 : currentYear;
-          const year2 = parseInt(month2) === 1 && parseInt(month1) === 12 ? currentYear : currentYear;
-          // Tạo date theo timezone Việt Nam
-          startDate = new Date(`${year1}-${String(parseInt(month1)).padStart(2, '0')}-${String(parseInt(day1)).padStart(2, '0')}T00:00:00+07:00`);
+          
+          if (part1.length === 3 && part2.length === 3) {
+            // Has year: "DD/MM/YYYY - DD/MM/YYYY"
+            const [day1, month1, year1] = part1.map(Number);
+            startDate = new Date(`${year1}-${String(month1).padStart(2, '0')}-${String(day1).padStart(2, '0')}T00:00:00+07:00`);
+          } else {
+            // No year: "DD/MM - DD/MM" - determine year
+            const [day1, month1] = part1.map(Number);
+            const year1 = parseInt(month1) === 12 ? currentYear - 1 : currentYear;
+            startDate = new Date(`${year1}-${String(month1).padStart(2, '0')}-${String(day1).padStart(2, '0')}T00:00:00+07:00`);
+          }
         }
       } else {
         // Bắt đầu từ thứ 2 của tuần hiện tại (theo timezone Việt Nam)

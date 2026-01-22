@@ -24,6 +24,10 @@ const packageConfigSchema = new mongoose.Schema(
       default: '#3b82f6', // Màu mặc định (xanh dương)
       trim: true,
     },
+    descriptions: {
+      type: [String],
+      default: [], // Mảng các mô tả cho gói
+    },
   },
   { timestamps: true },
 );

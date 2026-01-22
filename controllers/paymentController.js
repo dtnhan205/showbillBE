@@ -338,6 +338,255 @@ exports.verifyPayment = async (req, res) => {
   }
 };
 
+// GET /api/admin/payment/admin/stats - Super admin: Thống kê số tiền và lượt mua gói
+exports.getPaymentStats = async (req, res) => {
+  try {
+    if (req.admin.role !== 'super') {
+      return res.status(403).json({ message: 'Chỉ super admin mới có quyền truy cập.' });
+    }
+
+    const period = req.query.period || 'month';
+    const weekParam = req.query.week;
+    const monthParam = req.query.month;
+    const yearParam = req.query.year;
+    
+    // Tính ngày bắt đầu và kết thúc dựa trên period
+    let startDate = new Date();
+    let endDate = new Date();
+    const currentYear = new Date().getFullYear();
+    
+    // Helper: Lấy ngày hiện tại theo timezone Việt Nam và set về 0h
+    const getVietnamTodayStart = () => {
+      const today = new Date();
+      const vietnamTime = new Date(today.toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }));
+      const year = vietnamTime.getFullYear();
+      const month = String(vietnamTime.getMonth() + 1).padStart(2, '0');
+      const day = String(vietnamTime.getDate()).padStart(2, '0');
+      return new Date(`${year}-${month}-${day}T00:00:00+07:00`);
+    };
+    
+    if (period === 'week') {
+      if (weekParam) {
+        const parts = weekParam.split(' - ');
+        if (parts.length === 2) {
+          const part1 = parts[0].trim().split('/');
+          const part2 = parts[1].trim().split('/');
+          
+          if (part1.length === 3 && part2.length === 3) {
+            const [day1, month1, year1] = part1.map(Number);
+            const [day2, month2, year2] = part2.map(Number);
+            startDate = new Date(`${year1}-${String(month1).padStart(2, '0')}-${String(day1).padStart(2, '0')}T00:00:00+07:00`);
+            endDate = new Date(`${year2}-${String(month2).padStart(2, '0')}-${String(day2).padStart(2, '0')}T23:59:59+07:00`);
+          } else {
+            const [day1, month1] = part1.map(Number);
+            const [day2, month2] = part2.map(Number);
+            const year1 = parseInt(month1) === 12 ? currentYear - 1 : currentYear;
+            const year2 = parseInt(month2) === 1 && parseInt(month1) === 12 ? currentYear : currentYear;
+            startDate = new Date(`${year1}-${String(month1).padStart(2, '0')}-${String(day1).padStart(2, '0')}T00:00:00+07:00`);
+            endDate = new Date(`${year2}-${String(month2).padStart(2, '0')}-${String(day2).padStart(2, '0')}T23:59:59+07:00`);
+          }
+        }
+      } else {
+        const today = getVietnamTodayStart();
+        const dayOfWeek = today.getDay();
+        const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        startDate = new Date(today);
+        startDate.setDate(today.getDate() - daysToMonday);
+        endDate = new Date(startDate);
+        endDate.setDate(startDate.getDate() + 6);
+        endDate.setHours(23, 59, 59, 999);
+      }
+    } else if (period === 'month') {
+      if (monthParam) {
+        const monthMatch = monthParam.match(/Tháng (\d+)/);
+        if (monthMatch) {
+          const monthNum = parseInt(monthMatch[1]);
+          const year = yearParam ? parseInt(yearParam) : currentYear;
+          startDate = new Date(`${year}-${String(monthNum).padStart(2, '0')}-01T00:00:00+07:00`);
+          const lastDayOfMonth = new Date(year, monthNum, 0);
+          endDate = new Date(`${year}-${String(monthNum).padStart(2, '0')}-${String(lastDayOfMonth.getDate()).padStart(2, '0')}T23:59:59+07:00`);
+        }
+      } else {
+        const today = getVietnamTodayStart();
+        startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+        startDate.setHours(0, 0, 0, 0);
+        const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+        endDate = new Date(today.getFullYear(), today.getMonth(), lastDay.getDate());
+        endDate.setHours(23, 59, 59, 999);
+      }
+    } else if (period === 'year') {
+      const year = yearParam ? parseInt(yearParam) : currentYear;
+      startDate = new Date(`${year}-01-01T00:00:00+07:00`);
+      endDate = new Date(`${year}-12-31T23:59:59+07:00`);
+    }
+
+    // Tổng số tiền từ các payment đã completed trong khoảng thời gian
+    const totalRevenue = await Payment.aggregate([
+      {
+        $match: {
+          status: 'completed',
+          completedAt: { $gte: startDate, $lte: endDate },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$amount' },
+        },
+      },
+    ]);
+
+    // Tổng số lượt mua gói (payment completed) trong khoảng thời gian
+    const totalPurchases = await Payment.countDocuments({
+      status: 'completed',
+      completedAt: { $gte: startDate, $lte: endDate },
+    });
+
+    // Thống kê theo từng gói trong khoảng thời gian
+    const packageStats = await Payment.aggregate([
+      {
+        $match: {
+          status: 'completed',
+          completedAt: { $gte: startDate, $lte: endDate },
+        },
+      },
+      {
+        $group: {
+          _id: '$packageType',
+          count: { $sum: 1 },
+          totalAmount: { $sum: '$amount' },
+        },
+      },
+      {
+        $sort: { totalAmount: -1 },
+      },
+    ]);
+
+    // Thống kê theo tháng (6 tháng gần nhất)
+    const monthlyStats = await Payment.aggregate([
+      {
+        $match: {
+          status: 'completed',
+        },
+      },
+      {
+        $group: {
+          _id: {
+            year: { $year: '$completedAt' },
+            month: { $month: '$completedAt' },
+          },
+          count: { $sum: 1 },
+          totalAmount: { $sum: '$amount' },
+        },
+      },
+      {
+        $sort: { '_id.year': -1, '_id.month': -1 },
+      },
+      {
+        $limit: 6,
+      },
+    ]);
+
+    res.json({
+      totalRevenue: totalRevenue.length > 0 ? totalRevenue[0].total : 0,
+      totalPurchases,
+      packageStats: packageStats.map((stat) => ({
+        packageType: stat._id,
+        count: stat.count,
+        totalAmount: stat.totalAmount,
+      })),
+      monthlyStats: monthlyStats.map((stat) => ({
+        year: stat._id.year,
+        month: stat._id.month,
+        count: stat.count,
+        totalAmount: stat.totalAmount,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// GET /api/admin/payment/admin/history - Super admin: Lịch sử giao dịch của tất cả admin
+exports.getAllPaymentHistory = async (req, res) => {
+  try {
+    if (req.admin.role !== 'super') {
+      return res.status(403).json({ message: 'Chỉ super admin mới có quyền truy cập.' });
+    }
+
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    // Query filters
+    const filter = {};
+    if (req.query.status) {
+      filter.status = req.query.status;
+    }
+    if (req.query.packageType) {
+      filter.packageType = req.query.packageType;
+    }
+
+    // Date range filter
+    if (req.query.startDate || req.query.endDate) {
+      filter.createdAt = {};
+      if (req.query.startDate) {
+        const startDate = new Date(req.query.startDate);
+        startDate.setHours(0, 0, 0, 0);
+        filter.createdAt.$gte = startDate;
+      }
+      if (req.query.endDate) {
+        const endDate = new Date(req.query.endDate);
+        endDate.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = endDate;
+      }
+    }
+
+    const payments = await Payment.find(filter)
+      .populate({
+        path: 'adminId',
+        select: 'username email displayName',
+      })
+      .populate('bankAccountId')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const total = await Payment.countDocuments(filter);
+
+    // Xử lý trường hợp populate null
+    const processedPayments = payments.map((payment) => {
+      const paymentObj = payment.toObject ? payment.toObject() : payment;
+      return {
+        ...paymentObj,
+        adminId: paymentObj.adminId || {
+          _id: null,
+          username: 'Đã xóa',
+          email: 'N/A',
+          displayName: 'N/A',
+        },
+        bankAccountId: paymentObj.bankAccountId || {
+          bankName: 'N/A',
+          accountNumber: 'N/A',
+          accountHolder: 'N/A',
+        },
+      };
+    });
+
+    res.json({
+      payments: processedPayments,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
 // POST /api/admin/payment/switch-package - Admin: Chuyển đổi gói đang sử dụng
 exports.switchPackage = async (req, res) => {
   try {

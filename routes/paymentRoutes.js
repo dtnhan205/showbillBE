@@ -8,6 +8,8 @@ const {
   deletePayment,
   verifyPayment,
   switchPackage,
+  getPaymentStats,
+  getAllPaymentHistory,
 } = require('../controllers/paymentController');
 const {
   getPackageConfigs,
@@ -46,6 +48,8 @@ router.post('/admin/bank-accounts', protect, requireSuperAdmin, createBankAccoun
 router.put('/admin/bank-accounts/:id', protect, requireSuperAdmin, updateBankAccount);
 router.delete('/admin/bank-accounts/:id', protect, requireSuperAdmin, deleteBankAccount);
 router.post('/admin/verify', protect, requireSuperAdmin, verifyPayment);
+router.get('/admin/stats', protect, requireSuperAdmin, getPaymentStats);
+router.get('/admin/history', protect, requireSuperAdmin, getAllPaymentHistory);
 
 module.exports = router;
 
