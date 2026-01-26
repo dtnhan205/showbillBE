@@ -7,6 +7,7 @@ const {
   deleteCategory,
 } = require('../controllers/categoryController');
 const { protect } = require('../middleware/authMiddleware');
+const { createObCategoryLimiter } = require('../middleware/rateLimitMiddleware');
 
 const router = express.Router();
 
@@ -15,7 +16,7 @@ router.get('/', getCategories);
 
 // Admin
 router.get('/mine', protect, getMyCategories);
-router.post('/', protect, createCategory);
+router.post('/', protect, createObCategoryLimiter, createCategory);
 router.put('/:id', protect, updateCategory);
 router.delete('/:id', protect, deleteCategory);
 

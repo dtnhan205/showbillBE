@@ -5,6 +5,7 @@ const ViewStat = require('../models/ViewStat');
 const AdminReport = require('../models/AdminReport');
 const fs = require('fs');
 const path = require('path');
+const { sendAccountLockedEmail } = require('../services/emailService');
 
 // Helper function: Lấy ngày theo timezone Việt Nam (UTC+7)
 function getVietnamDate(date = new Date()) {
@@ -66,15 +67,37 @@ exports.toggleAdminActive = async (req, res) => {
       return res.status(400).json({ message: 'Không thể khóa super admin.' });
     }
 
+    const wasActive = admin.isActive !== false;
     admin.isActive = admin.isActive === false ? true : false;
     await admin.save();
+
+    // Gửi email thông báo khi tài khoản bị khóa (không gửi khi mở khóa)
+    if (!admin.isActive && wasActive) {
+      try {
+        const emailResult = await sendAccountLockedEmail(
+          admin.email,
+          admin.displayName || admin.username
+        );
+        
+        if (emailResult.success) {
+          console.log('[toggleAdminActive] Account locked email sent to:', admin.email);
+        } else {
+          console.warn('[toggleAdminActive] Failed to send account locked email:', emailResult.error);
+          // Không throw error, chỉ log warning
+        }
+      } catch (emailErr) {
+        console.error('[toggleAdminActive] Error sending account locked email:', emailErr);
+        // Không throw error, chỉ log error
+      }
+    }
 
     res.json({
       message: admin.isActive ? 'Đã mở khóa tài khoản admin.' : 'Đã tạm khóa tài khoản admin.',
       admin,
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error('[toggleAdminActive] Error:', err);
+    res.status(500).json({ message: err.message || 'Lỗi máy chủ khi cập nhật trạng thái tài khoản' });
   }
 };
 
@@ -171,8 +194,22 @@ exports.updateMyProfile = async (req, res) => {
     }
 
     const update = {};
-    if (typeof displayName !== 'undefined') update.displayName = String(displayName).trim();
-    if (typeof bio !== 'undefined') update.bio = String(bio);
+    // Validate và sanitize displayName
+    if (typeof displayName !== 'undefined') {
+      const trimmed = String(displayName).trim();
+      if (trimmed.length > 100) {
+        return res.status(400).json({ message: 'Tên hiển thị không được vượt quá 100 ký tự' });
+      }
+      update.displayName = trimmed;
+    }
+    // Validate và sanitize bio
+    if (typeof bio !== 'undefined') {
+      const bioStr = String(bio);
+      if (bioStr.length > 500) {
+        return res.status(400).json({ message: 'Bio không được vượt quá 500 ký tự' });
+      }
+      update.bio = bioStr;
+    }
     
     // Xử lý avatar upload (file) - multer fields trả về object với keys là field names
     if (req.files && req.files.avatar && req.files.avatar.length > 0) {
@@ -242,6 +279,54 @@ exports.updateMyProfile = async (req, res) => {
     res.json(admin);
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+};
+
+// POST /api/admin/change-password
+exports.changePassword = async (req, res) => {
+  try {
+    const adminId = req.admin._id;
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: 'Vui lòng nhập mật khẩu hiện tại và mật khẩu mới' });
+    }
+
+    if (String(newPassword).trim().length < 6) {
+      return res.status(400).json({ message: 'Mật khẩu mới tối thiểu 6 ký tự' });
+    }
+
+    const admin = await Admin.findById(adminId);
+    if (!admin) {
+      return res.status(404).json({ message: 'Không tìm thấy tài khoản. Vui lòng đăng nhập lại.' });
+    }
+
+    if (admin.isActive === false) {
+      return res.status(403).json({ message: 'Tài khoản đã bị tạm khóa. Vui lòng liên hệ admin.' });
+    }
+
+    // Kiểm tra mật khẩu hiện tại
+    const isMatch = await admin.comparePassword(currentPassword);
+    if (!isMatch) {
+      return res.status(401).json({ message: 'Mật khẩu hiện tại không đúng. Vui lòng kiểm tra lại.' });
+    }
+
+    // Kiểm tra mật khẩu mới không trùng với mật khẩu cũ
+    const isSamePassword = await admin.comparePassword(newPassword);
+    if (isSamePassword) {
+      return res.status(400).json({ message: 'Mật khẩu mới phải khác với mật khẩu hiện tại' });
+    }
+
+    // Đặt mật khẩu mới
+    admin.password = newPassword;
+    await admin.save();
+
+    console.log('[changePassword] Password changed successfully for admin:', adminId);
+    res.json({ message: 'Đổi mật khẩu thành công' });
+  } catch (err) {
+    console.error('[changePassword] Error:', err);
+    // Không leak thông tin lỗi chi tiết
+    res.status(500).json({ message: 'Lỗi máy chủ khi đổi mật khẩu. Vui lòng thử lại sau.' });
   }
 };
 

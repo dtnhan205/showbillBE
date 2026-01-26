@@ -5,6 +5,7 @@ const Admin = require('../models/Admin');
 const Product = require('../models/Product');
 const mongoose = require('mongoose');
 const { validateAndCleanAvatarFrame } = require('./adminController');
+const { sendPaymentSuccessEmail } = require('../services/emailService');
 
 // Helper: Tạo mã nội dung chuyển khoản unique (dtnxxxxx)
 async function generateTransferContent() {
@@ -325,6 +326,28 @@ exports.verifyPayment = async (req, res) => {
       admin.packageExpiry = expiryDate;
 
       await admin.save();
+
+      // Gửi email xác nhận thanh toán thành công (không block nếu email fail)
+      try {
+        const emailResult = await sendPaymentSuccessEmail(
+          admin.email,
+          admin.displayName || admin.username,
+          payment.packageType,
+          payment.amount,
+          expiryDate,
+          payment.transferContent
+        );
+        
+        if (emailResult.success) {
+          console.log('[verifyPayment] Payment success email sent to:', admin.email);
+        } else {
+          console.warn('[verifyPayment] Failed to send payment success email:', emailResult.error);
+          // Không throw error, chỉ log warning vì email không quan trọng bằng việc cập nhật gói
+        }
+      } catch (emailErr) {
+        console.error('[verifyPayment] Error sending payment success email:', emailErr);
+        // Không throw error, chỉ log error
+      }
     }
 
     // Cập nhật trạng thái payment
@@ -334,7 +357,8 @@ exports.verifyPayment = async (req, res) => {
 
     res.json({ message: 'Đã xác minh thanh toán thành công.', payment });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error('[verifyPayment] Error:', err);
+    res.status(500).json({ message: err.message || 'Lỗi máy chủ khi xác minh thanh toán' });
   }
 };
 

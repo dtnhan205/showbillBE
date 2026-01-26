@@ -67,6 +67,10 @@ const adminSchema = new mongoose.Schema(
         },
       },
     ],
+
+    // Reset password token và expiry
+    resetPasswordToken: { type: String, default: null },
+    resetPasswordExpires: { type: Date, default: null },
   },
   { timestamps: true },
 );

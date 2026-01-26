@@ -31,7 +31,9 @@ exports.getCategories = async (req, res) => {
 exports.getMyCategories = async (req, res) => {
   try {
     const { includeInactive, page = 1, limit = 100 } = req.query;
-    const filter = { adminId: req.admin?._id };
+    
+    // Super admin có thể xem tất cả categories, admin thường chỉ xem của mình
+    const filter = req.admin?.role === 'super' ? {} : { adminId: req.admin?._id };
 
     if (String(includeInactive).toLowerCase() !== 'true') filter.isActive = true;
 

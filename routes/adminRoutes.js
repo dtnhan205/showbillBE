@@ -5,6 +5,7 @@ const {
   toggleAdminActive,
   getMyProfile,
   updateMyProfile,
+  changePassword,
   getMyStats,
   getSystemStats,
   getMyChartData,
@@ -16,6 +17,7 @@ const {
   updateReportStatus,
 } = require('../controllers/adminController');
 const upload = require('../middleware/uploadMiddleware');
+const { uploadLimiter, profileUpdateLimiter } = require('../middleware/rateLimitMiddleware');
 
 const router = express.Router();
 
@@ -30,7 +32,8 @@ router.delete('/reports/:id/reset', protect, requireSuperAdmin, resetAdminReport
 
 // Profile
 router.get('/profile', protect, getMyProfile);
-router.put('/profile', protect, upload.uploadAvatarAndBanner, updateMyProfile);
+router.put('/profile', protect, profileUpdateLimiter, uploadLimiter, upload.uploadAvatarAndBanner, updateMyProfile);
+router.post('/change-password', protect, changePassword);
 
 // Stats
 router.get('/stats', protect, getMyStats);

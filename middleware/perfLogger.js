@@ -4,17 +4,20 @@ function patchMongooseDebug() {
   if (mongoose.__perfDebugPatched) return;
   mongoose.__perfDebugPatched = true;
 
-  // Logs query shape. For durations, use MongoDB profiler (recommended).
-  mongoose.set('debug', (collectionName, method, query, doc, options) => {
-    const tracked = new Set(['find', 'findOne', 'aggregate', 'updateMany', 'countDocuments', 'findOneAndUpdate']);
-    if (!tracked.has(method)) return;
-    console.log(`[mongo] ${collectionName}.${method}`, {
-      query,
-      doc,
-      options,
-      at: new Date().toISOString(),
-    });
-  });
+  // MongoDB debug logging disabled - uncomment below to enable
+  // mongoose.set('debug', (collectionName, method, query, doc, options) => {
+  //   const tracked = new Set(['find', 'findOne', 'aggregate', 'updateMany', 'countDocuments', 'findOneAndUpdate']);
+  //   if (!tracked.has(method)) return;
+  //   console.log(`[mongo] ${collectionName}.${method}`, {
+  //     query,
+  //     doc,
+  //     options,
+  //     at: new Date().toISOString(),
+  //   });
+  // });
+  
+  // Disable mongoose debug logging
+  mongoose.set('debug', false);
 }
 
 function perfLogger({ slowMs = 800 } = {}) {

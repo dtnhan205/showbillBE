@@ -7,6 +7,7 @@ const {
   deleteObVersion,
 } = require('../controllers/obController');
 const { protect } = require('../middleware/authMiddleware');
+const { createObCategoryLimiter } = require('../middleware/rateLimitMiddleware');
 
 const router = express.Router();
 
@@ -15,7 +16,7 @@ router.get('/', getObVersions);
 
 // Admin
 router.get('/mine', protect, getMyObVersions);
-router.post('/', protect, createObVersion);
+router.post('/', protect, createObCategoryLimiter, createObVersion);
 router.put('/:id', protect, updateObVersion);
 router.delete('/:id', protect, deleteObVersion);
 
