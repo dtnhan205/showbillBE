@@ -27,24 +27,10 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }, // Cho phép serve static files
 }));
 
-// CORS Configuration
+// CORS Configuration - Cho phép tất cả origins
 const corsOptions = {
-  origin: function (origin, callback) {
-    // Cho phép requests không có origin (mobile apps, Postman, etc.)
-    if (!origin) return callback(null, true);
-    
-    // Lấy danh sách allowed origins từ env hoặc mặc định
-    const allowedOrigins = process.env.ALLOWED_ORIGINS 
-      ? process.env.ALLOWED_ORIGINS.split(',')
-      : ['http://localhost:3000', 'http://localhost:5173'];
-    
-    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
+  origin: '*', // Cho phép tất cả origins
+  credentials: false, // Phải false khi origin là '*'
   optionsSuccessStatus: 200,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
