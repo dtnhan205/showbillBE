@@ -171,6 +171,21 @@ exports.getPublicAdminDetail = async (req, res) => {
       .skip(skip)
       .limit(limitNum);
 
+    // Tính tổng bill và tổng lượt xem cho tất cả bill (không phân trang)
+    const statsAgg = await Product.aggregate([
+      { $match: { adminId: admin._id, isHidden: false } },
+      {
+        $group: {
+          _id: null,
+          totalBills: { $sum: 1 },
+          totalViews: { $sum: '$views' },
+        },
+      },
+    ]);
+
+    const totalBills = statsAgg[0]?.totalBills || 0;
+    const totalViews = statsAgg[0]?.totalViews || 0;
+
     // Unique obs + categories from their products
     const obs = Array.from(new Set(products.map((p) => p.obVersion).filter(Boolean))).sort();
     const categories = Array.from(new Set(products.map((p) => p.category).filter(Boolean))).sort();
@@ -191,6 +206,10 @@ exports.getPublicAdminDetail = async (req, res) => {
         activePackage: packageType,
         packageColor: packageColor,
         avatarFrame: admin.avatarFrame || '',
+        stats: {
+          totalBills,
+          totalViews,
+        },
       },
       obs,
       categories,

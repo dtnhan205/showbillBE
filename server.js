@@ -5,6 +5,7 @@ const Product = require('./models/Product');
 const { checkAndUpdatePayments } = require('./services/bankTransactionService');
 
 const PORT = process.env.PORT || 5000;
+const HOST = process.env.HOST || '0.0.0.0'; // Listen trên tất cả interfaces để có thể truy cập từ bên ngoài
 
 const bootstrapMigration = async () => {
   // Migration: assign adminId for old products
@@ -39,8 +40,8 @@ connectDB()
       console.error('[bootstrap] Migration error:', e);
     }
 
-    app.listen(PORT, () => {
-      console.log(`Server đang chạy trên port ${PORT}`);
+    app.listen(PORT, HOST, () => {
+      console.log(`Server đang chạy trên ${HOST}:${PORT}`);
       console.log('[Cron] Đang khởi động cron job kiểm tra thanh toán mỗi 15 giây...');
     });
 
