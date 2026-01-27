@@ -3,6 +3,9 @@ const Admin = require('../models/Admin');
 const Product = require('../models/Product');
 const ViewStat = require('../models/ViewStat');
 const AdminReport = require('../models/AdminReport');
+const Category = require('../models/Category');
+const ObVersion = require('../models/ObVersion');
+const Payment = require('../models/Payment');
 const fs = require('fs');
 const path = require('path');
 const { sendAccountLockedEmail } = require('../services/emailService');
@@ -419,7 +422,22 @@ exports.getMyStats = async (req, res) => {
     });
     const totalViews = viewsStats.reduce((sum, stat) => sum + (stat.views || 0), 0);
 
-    res.json({ totalBills, totalVisibleBills, totalViews });
+    // Tổng Category và OB/Mùa game của riêng admin này (không phụ thuộc bộ lọc thời gian)
+    const [totalCategories, totalObVersions, totalPackagesPurchased] = await Promise.all([
+      Category.countDocuments({ adminId }),
+      ObVersion.countDocuments({ adminId }),
+      // Đếm số lần mua gói đã hoàn thành
+      Payment.countDocuments({ adminId, status: 'completed' }),
+    ]);
+
+    res.json({
+      totalBills,
+      totalVisibleBills,
+      totalViews,
+      totalCategories,
+      totalObVersions,
+      totalPackagesPurchased,
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -495,6 +513,12 @@ exports.getSystemStats = async (req, res) => {
 
     // Tổng admin (không filter theo thời gian)
     const totalAdmins = await Admin.countDocuments({});
+
+    // Tổng Category và OB/Mùa game của tất cả admin (không filter thời gian)
+    const [totalCategories, totalObVersions] = await Promise.all([
+      Category.countDocuments({}),
+      ObVersion.countDocuments({}),
+    ]);
     
     // Tổng bill trong khoảng thời gian
     const totalBills = await Product.countDocuments({
@@ -518,7 +542,13 @@ exports.getSystemStats = async (req, res) => {
       totalViews = productsInPeriod.reduce((sum, p) => sum + (p.views || 0), 0);
     }
 
-    res.json({ totalAdmins, totalBills, totalViews });
+    res.json({
+      totalAdmins,
+      totalBills,
+      totalViews,
+      totalCategories,
+      totalObVersions,
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
